@@ -1,0 +1,96 @@
+[
+  {
+    "index": 0,
+    "productName": "AL80 Keyboard",
+    "vendorId": "0x28e9",
+    "productId": "0x30af",
+    "opened": true,
+    "collections": [
+      {
+        "usagePage": "0xff60",
+        "usage": "0x61",
+        "inputReports": [
+          {
+            "reportId": 0
+          }
+        ],
+        "outputReports": [
+          {
+            "reportId": 0
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "index": 1,
+    "productName": "AL80 Keyboard",
+    "vendorId": "0x28e9",
+    "productId": "0x30af",
+    "opened": false,
+    "collections": [
+      {
+        "usagePage": "0xff31",
+        "usage": "0x74",
+        "inputReports": [
+          {
+            "reportId": 0
+          }
+        ],
+        "outputReports": []
+      }
+    ]
+  },
+  {
+    "index": 2,
+    "productName": "AL80 Keyboard",
+    "vendorId": "0x28e9",
+    "productId": "0x30af",
+    "opened": false,
+    "collections": [
+      {
+        "usagePage": "0x1",
+        "usage": "0x6",
+        "inputReports": [],
+        "outputReports": []
+      }
+    ]
+  },
+  {
+    "index": 3,
+    "productName": "AL80 Keyboard",
+    "vendorId": "0x28e9",
+    "productId": "0x30af",
+    "opened": false,
+    "collections": [
+      {
+        "usagePage": "0x1",
+        "usage": "0x2",
+        "inputReports": [],
+        "outputReports": []
+      },
+      {
+        "usagePage": "0x1",
+        "usage": "0x80",
+        "inputReports": [],
+        "outputReports": []
+      },
+      {
+        "usagePage": "0xc",
+        "usage": "0x1",
+        "inputReports": [
+          {
+            "reportId": 4
+          }
+        ],
+        "outputReports": []
+      },
+      {
+        "usagePage": "0x1",
+        "usage": "0x6",
+        "inputReports": [],
+        "outputReports": []
+      }
+    ]
+  }
+]

@@ -1,0 +1,16 @@
+# runtime log created by the clock scripts
+al80_clock.log
+
+# node
+node_modules/
+package-lock.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os
+Thumbs.db
+.DS_Store
