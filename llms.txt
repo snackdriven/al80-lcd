@@ -1,6 +1,6 @@
 # AL80 LCD
 
-> Reverse-engineering the YUNZII AL80 keyboard's LCD panel over raw HID, plus the tooling it produced. Headline result: a 12-hour clock on the LCD without reflashing (the stock ripple-lighting firmware stays in place). The still-image and GIF streaming protocols are decoded (display is 112×137, RGB565 big-endian). Device: VID 0x28E9 / PID 0x30AF; LCD is HID interface usagePage 0xFF60 / usage 0x61; screen ops are a 0x40 announce → 0x41 data → 0x42 finish sequence over 64-byte reports.
+> Reverse-engineering the YUNZII AL80 keyboard's LCD panel over raw HID, plus the tooling it produced. Headline result: a 12-hour clock on the LCD without reflashing (the stock ripple-lighting firmware stays in place). The still-image and GIF streaming protocols are decoded (display is 112×137, RGB565 big-endian), and both packet checksums are cracked (announce = CRC16-MODBUS; data blocks = a 16-bit accumulator seeded 121, +56/block), so a full custom-image transfer can be forged end-to-end. Device: VID 0x28E9 / PID 0x30AF; LCD is HID interface usagePage 0xFF60 / usage 0x61; screen ops are a 0x40 announce → 0x41 data → 0x42 finish sequence over 64-byte reports.
 
 Read the knowledge base first — it is self-contained and holds every confirmed fact, packet layout, and open question. The other files are runnable tooling and the raw research material behind it.
 

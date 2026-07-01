@@ -57,8 +57,9 @@ See [`tooling/README.md`](tooling/README.md) for launchers and auto-start-at-log
 ## Status
 
 - **Done & shipped:** 12hr clock sync (confirmed working), full tooling.
-- **Confirmed:** display resolution (112×137) and pixel format (RGB565 BE), the still-image and **GIF animation** packet structure (N sequential full frames + a global frame-rate dialog), and that the `0xFF60` LCD interface only accepts `0x40`/`0x41`/`0x42` (NAKs everything else). The "live info panel" idea is now fully feasible — format and resolution are known.
-- **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], the exact width/height/length encoding in the image announce/setup header, and the GIF frame-count / frame-rate byte fields. Details in the knowledge base, §10.
+- **Confirmed:** display resolution (112×137) and pixel format (RGB565 BE); the still-image and **GIF animation** packet structure; the fully-framed `0x40` announce header; and **both checksums cracked** — the announce CRC is CRC16-MODBUS over bytes[9..11], and the image data-block field is a 16-bit LE accumulator (seed 121, +56/block). A full custom-image transfer can now be forged end-to-end (knowledge base §12). The "live info panel" is fully feasible.
+- **Open:** the announce 3-byte size field, the accumulator's seed origin, GIF per-frame addressing / frame-count / frame-rate bytes, and the full view-switch command map. Details in the knowledge base, §10.
+- **Note:** display attributes (brightness, grayscale, etc.) are **client-side only** — no device opcode; bake them into your pixel buffer before sending.
 
 ## Links
 
