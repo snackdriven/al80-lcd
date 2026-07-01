@@ -6,10 +6,9 @@ Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling t
 
 | Path | What it is |
 |------|-----------|
-| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up (**v2**): device identity, HID protocol, the 12hr hack, **confirmed display specs + image-stream format**, a custom-frame render recipe, open questions, and safety warnings. Start here. |
-| [`AL80_KNOWLEDGE_BASE_v1.md`](AL80_KNOWLEDGE_BASE_v1.md) | Superseded v1, kept for a few granular capture samples and per-interface details v2 compressed out. |
+| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up (all sessions merged into one): device identity, HID protocol, the 12hr hack, confirmed display specs + still-image and GIF stream formats, a custom-frame render recipe, open questions, and safety warnings. Start here. |
 | [`tooling/`](tooling/) | Runnable clock-sync scripts (Node + Python), launchers, and a no-install browser-console version. |
-| [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, the site's JS bundle, and the `image_capture/` test pattern used to confirm the display resolution. |
+| [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, the site's JS bundle, the `image_capture/` test pattern (confirmed the resolution), and `gif_capture/` (decoded the animation protocol). |
 | [`firmware/`](firmware/) | Reference copy of the ripple-lighting firmware this project is built around. Do not reflash casually. |
 | [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |
 | [`keymap/`](keymap/) | VIA/QMK keymap export (the layout from the knowledge base, §8). |
@@ -57,8 +56,8 @@ See [`tooling/README.md`](tooling/README.md) for launchers and auto-start-at-log
 ## Status
 
 - **Done & shipped:** 12hr clock sync (confirmed working), full tooling.
-- **Confirmed (v2):** display resolution (112×137) and pixel format (RGB565 BE), image-stream packet structure, and that the `0xFF60` LCD interface only accepts `0x40`/`0x41`/`0x42` (NAKs everything else). The "live info panel" idea is now fully feasible — format and resolution are known.
-- **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], the exact width/height/length encoding in the image announce/setup header, and GIF frame framing/timing. Details in the knowledge base, §9.
+- **Confirmed:** display resolution (112×137) and pixel format (RGB565 BE), the still-image and **GIF animation** packet structure (N sequential full frames + a global frame-rate dialog), and that the `0xFF60` LCD interface only accepts `0x40`/`0x41`/`0x42` (NAKs everything else). The "live info panel" idea is now fully feasible — format and resolution are known.
+- **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], the exact width/height/length encoding in the image announce/setup header, and the GIF frame-count / frame-rate byte fields. Details in the knowledge base, §10.
 
 ## Links
 
