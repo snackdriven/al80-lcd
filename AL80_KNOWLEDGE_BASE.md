@@ -4,7 +4,7 @@ status: active
 updated: 2026-07-01
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
-confirmed: display 112×137 RGB565 big-endian; time-sync protocol; still-image and GIF packet structure; announce CRC16-MODBUS and data-block accumulator both cracked
+confirmed: display 112×137 RGB565 big-endian; time-sync protocol; still-image and GIF packet structure (GIF = banked ~1KB windows); announce CRC16-MODBUS; unified 16-bit data-packet checksum; view-switch command table
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
@@ -29,7 +29,7 @@ the read-only command-sweep result, open questions, and future modification idea
 | Screen-op sequence | 0x40 announce → 0x41 data → 0x42 finish |
 | Announce type byte[9] | 0x09 = time, 0x10 = image, 0x12 = GIF |
 | Announce CRC bytes[12,13] | CRC16-MODBUS of bytes[9..11], stored big-endian |
-| Image data-block accum bytes[4,5] | 16-bit LE, seed 121 (0x79), += 56 per block |
+| Data-packet checksum bytes[4,5] | 16-bit LE = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF` |
 | Time data checksum | `CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF` |
 | 12-hour hour value | `HH = (hour24 % 12) || 12` |
 | Re-sync interval | ~60 s (keyboard free-runs its own clock and drifts) |
@@ -151,27 +151,33 @@ different interface (likely 0xFF31). **Do NOT probe 0xB1–0xB7** (brick risk).
 Every operation opens with the same header layout. Confirmed across 3,460 captured packets
 (only opcodes 0x40/0x41/0x42 ever appear):
 
-    40 00 00 [size:3 LE] 00 A5 5A [type] [flags:2] [crc16:2]
+    40 00 00 07 [c4 c5] 00 A5 5A [type] [param] [subcmd] [crc16:2]
 
 - byte[0]       = 0x40
 - byte[1,2]     = 0x00 0x00
-- byte[3,4,5]   = **size**, 3-byte little-endian (exact semantics still open — not a plain
-                  byte count; see §10, Open Questions)
+- byte[3]       = **0x07 CONSTANT** across every command observed (a format/version marker,
+                  **not** a length — rev2.1 refinement).
+- byte[4,5]     = a **per-command-type constant** (little-endian). Reproducible-constant per
+                  command, but not a CRC or arithmetic function of the header that anyone has
+                  matched (tested many CRC polys/ranges, payload CRC, header sum — no fit).
+                  Treat as fixed: reuse the captured value. (Seen: homepage 339, picture 566,
+                  GIF-page 601, time 758, image frame 758.) See §10, Open Questions.
 - byte[6]       = 0x00 reserved
 - byte[7,8]     = **0xA5 0x5A** magic constant (in every announce)
-- byte[9]       = **type / channel** — 0x09 = time-sync, 0x10 = still image, 0x12 = GIF
-- byte[10,11]   = **flags** (2 bytes)
+- byte[9]       = **type / channel** (see the command table in §7)
+- byte[10]      = **param** (usually 0)
+- byte[11]      = **subcmd**
 - byte[12,13]   = **CRC16-MODBUS of bytes[9..11]**, stored **big-endian** (see §5e)
 
 Time announce (byte[9] = 0x09):
 
     40 00 00 07 F6 02 00 A5 5A 09 00 03 C3 E1   (rest zero-padded to 64)
 
-> **Correction note.** The "New findings" delta doc labeled byte[9] type `9 = image/GIF,
-> 18 = time` — that is **backwards**. Ground truth: the shipped clock scripts send the
-> byte[9]=0x09 announce above and it syncs the **clock**, so 0x09 = time. The CRC math in
-> the delta is unaffected (it verified regardless of the label). Corrected here: 0x09=time,
-> 0x10=image, 0x12=GIF.
+> **Type-byte note.** An earlier delta doc labeled byte[9] `9 = image/GIF, 18 = time` — that
+> is backwards; the shipped clock scripts send the byte[9]=0x09 announce above and it syncs
+> the **clock**. Measured mapping in this repo: **0x09=time, 0x10=image, 0x12=GIF**. rev2.1
+> proposes type 9 is instead a *generic data-write channel* — see the fuller discrepancy note
+> and the command table in §7. The CRC math (§5e) holds regardless of the label.
 
 ### 5e. Checksums — both CRACKED (were the top open questions in v2)
 
@@ -184,20 +190,33 @@ Time announce (byte[9] = 0x09):
   - GIF   `[0x12,0,0x02]` → 0x0450 (bytes 4,80)   ✓
 - (Re-verified independently in this repo, not just taken from the delta.)
 
-**Data-block accumulator (0x41 image/GIF blocks, bytes[4,5]) — the old "byte[4] checksum" mystery.**
-- bytes[4,5] = a **16-bit little-endian running accumulator**, NOT a per-packet byte sum.
-- **Seed = 121 (0x79)**, then **+= 56** (the payload length) per data block.
-- Sequence: 121, 177, 233, 289, 345, … — matches the sample block bytes `79, b1, e9, …` in §7.
-- Constant seed 121 across both image and GIF transfers.
+**Data-packet checksum (0x41, bytes[4,5]) — CRACKED and verified in-repo.**
 
-Note: this accumulator is specific to the **image/GIF data blocks** (byte[3]=0x38). The
-**time** data packet below uses a different, simpler additive checksum on byte[4].
+    bytes[4,5] (16-bit LITTLE-ENDIAN) = ( 0x41 + offLo + offHi + len + Σpayload ) & 0xFFFF
+
+i.e. a **16-bit additive checksum over the whole 64-byte packet, excluding the checksum
+field itself** (bytes[4,5]) and the zero pad. Verified against every image data block in
+the archived captures: **1096/1096 still + 3192/3192 GIF = 4288/4288 exact matches**
+(`research/analyze_captures.py`).
+
+> **Correction — supersedes the "seed 121 / += 56 accumulator" claim in both delta docs.**
+> That model is wrong. It only *looks* like a running counter on a zero/constant payload:
+> for offset 0, len 0x38 the header sum is `0x41 + 0 + 0 + 0x38 = 121`, so an all-zero
+> payload gives 121, 177 (next offset adds nothing but the changed offset bytes)… On real
+> pixel data the value is content-dependent (e.g. block 0 of the test pattern = 0x19B7, not
+> 121). The correct rule is the additive checksum above.
+
+This rule is **unified** with the time packet (§5b): for a time packet `len=3`,
+`payload=[HH,MM,SS]`, the formula gives `(0x41 + 0x03 + HH + MM + SS) & 0xFFFF`, whose low
+byte is exactly the documented time checksum (byte[5]=0 because the values are small). So
+there is **one checksum rule for all 0x41 data packets.**
 
 ### 5b. Time data packet (0x41, subcommand 0x03)
     41 00 00 03 [CKSUM] 00 00 HH MM SS   (rest zero-padded to 64)
 
 - byte[3] = 0x03 (subcommand: set time)
-- byte[4] = **CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF**  (VERIFIED across samples)
+- byte[4] = **CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF** (VERIFIED) — this is just the low
+  byte of the unified 16-bit data-packet checksum in §5e (byte[5]=0 for small values).
 - byte[7] = HH (hour)
 - byte[8] = MM (minute)
 - byte[9] = SS (second)
@@ -252,7 +271,8 @@ Sequence: **0x40 announce → many 0x41 data blocks → 0x42 finish.**
 - byte[1,2]   = **LITTLE-ENDIAN destination byte-offset** into the frame buffer; steps by
                 56 each block (0, 56, 112, 168, 224, 280 …).
 - byte[3]     = payload length (0x38 = 56 data bytes; final block uses 0x10 = 16).
-- byte[4,5]   = **16-bit LE running accumulator**: seed 121 (0x79), += 56 per block (see §5e).
+- byte[4,5]   = **16-bit LE additive checksum** = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF`
+                (see §5e — verified 4288/4288 blocks; NOT the old "seed 121" accumulator).
 - byte[6]     = 0x00 reserved.
 - byte[7..62] = 56 bytes of payload = raw **RGB565 big-endian** pixels, row-major from
                 top-left (see §3, Display Specs).
@@ -309,24 +329,52 @@ So: **a GIF = N sequential frames + a single global frame-rate setting.** Visual
 at save time: the app shows **"保存帧 N/3"** ("Saving frame N/3") with a 0/50/67/100% progress
 bar — one full announce→data→finish transaction per frame.
 
-> **Caveat — GIF per-frame size not yet reconciled.** The GIF *findings* note asserted
-> "each frame ≈ 30,688 bytes" (a full 112×137 image), but the raw capture
-> (`research/gif_capture/testgif_capture_raw.json`) does not match that: its data-block
-> offsets top out at only **0x03F0 (1,008)** and reset ~84 times across 3,192 records,
-> nowhere near the still-image max of 0x77A8. So GIF frames in this capture are addressed
-> in much smaller offset windows than a full still frame. Whether that's per-frame
-> compression, the solid-color test frames, or a different address meaning in GIF mode is
-> **not decoded** — see §10, Open Questions, items 4–5. The still-image path (above) is the
-> only fully-confirmed frame layout.
+**GIF frame addressing — RESOLVED (decoded offline from the raw capture).** GIF frames *are*
+full 112×137 RGB565 frames (~30,688 bytes each), but they are **not** streamed in the still
+image's single continuous `0x0000→0x77A8` offset space. Instead the pixel data is sent in
+**banked ~1 KB windows**: byte[1,2] offset runs `0x0000 → 0x03F0` (≈19 blocks) then **resets
+to 0** for the next bank. Analysis of `research/gif_capture/testgif_capture_raw.json`:
+
+- 3 frames, delimited by the `0x0A → 0x07` setup pair (six of each = 3 frames × 2 setup roles).
+- Per frame: **~28–31 banks** of ~1 KB each → ~30,688 bytes, i.e. one full frame. (Measured
+  runs per frame: 31, 30, 25; the spread is duplicate sends + partial trailing banks.)
+- 86 data runs total, each capped at offset 0x03F0 — this is why a naive max-offset read
+  showed 0x03F0 and looked like it contradicted "30,688 bytes/frame." It doesn't: the bank
+  base is carried by the setup packets, not by byte[1,2].
+
+So the still image uses one flat offset space to 0x77A8; the GIF uses banked ~1 KB windows
+with the same 56-byte block form inside each bank. What's still open is the exact bank-base /
+frame-count encoding in the `0x0A` setup (see §10, Open Questions).
 
 Gotcha for analysis: a capture may contain a stray time-sync (`0x41 sub3 "06 17 09"`)
 from the auto-sync loop firing mid-transfer — ignore those.
 
-### View-switch commands (Equipment Setup buttons)
-- "Switch to homepage" (clock): 0x40 announce with **byte[12]=0x02**
-      40 00 00 07 53 01 00 a5 5a 0b 00 00 02 00
-- Other buttons (picture page, GIF page) send similar 0x40 headers with different
-  byte[4]/byte[12] values (0x36, 0x59, 0x67 seen). Not individually mapped yet.
+### View-switch / command table (captured live from the Equipment-setup buttons)
+
+Each is an announce + 0x42 finish with **zero data packets**. Values below are from the
+rev2.1 session (not re-derivable from this repo's captures, which didn't press these buttons):
+
+| Command | type byte[9] | subcmd byte[11] | announce bytes[4,5] |
+|---------|-------------|-----------------|---------------------|
+| Switch to homepage (clock) | 11 | 0 | 83, 1 |
+| Switch to picture page     | 13 | 0 | 54, 2 |
+| Switch to GIF page         | 15 | 0 | 89, 2 |
+| Update device time (txn 1) | 9  | 3 | 246, 2 → data payload `[0x12,0x2F]` |
+| Update device time (txn 2) | 10 | 4 | — → data payload `[26,3,7,1]` (packed date/time) |
+
+The announce CRC16-MODBUS (§5e) was generalized and **verified on 5 distinct commands**
+(homepage 0x0200, picture 0x03E0, GIF 0xC341, time-A 0xC3E1, time-B 0x0150).
+
+Not captured (would wipe content): "Clear the picture", "Clear GIF" — expected to be the
+same announce + finish shape.
+
+> **type-9 caveat / discrepancy to resolve.** rev2.1 says type 9 / subcmd 3 is a **generic
+> data-write channel**, reused for the time txn AND (it claims) the image/GIF pixel transfer,
+> and that `[4,5]=246,2` is *not* an image frame-size. But **this repo's still capture shows
+> the image transfer using announce type 0x10** (`…5A 10 00 01 C5 B1 01`, [4,5]=207,2), and
+> the GIF using type 0x12 — not type 9. Both can't be literally true, so they're likely from
+> different capture sessions / app states. Measured-here mapping: **0x09=time, 0x10=image,
+> 0x12=GIF**. rev2.1's "generic channel" framing is recorded but unverified against this repo's data.
 
 ### Display attributes are CLIENT-SIDE (no device opcode)
 
@@ -391,40 +439,46 @@ dialog, default 30 FPS, global per GIF).
 
 ## 9. Related Keymap Work (VIA, same keyboard, separate from LCD)
 
-Export in `keymap/AL80_QMK__V0106_20251219.json`. Done in usevia.app via a
-Save-JSON → edit → Load-JSON workflow (VIA's blank "Any" key assigns KC_NO, not a
-custom keycode, so direct JSON editing was used):
+Current keymap: `keymap/al80_keymap.json` (4 layers, macros, encoders — the live layout).
+The `keymap/AL80_QMK__V0106_20251219.json` alongside it is the VIA keyboard *definition*, not
+the bindings. Done in usevia.app via a Save-JSON → edit → Load-JSON workflow (VIA's blank
+"Any" key assigns KC_NO, not a custom keycode, so direct JSON editing was used):
 
 - Layer 0: F12 = LT(1,KC_F12); Caps Lock = LT(2,KC_CAPS); Del restored to KC_DEL.
 - Layer 1 (hold F12) app launcher: S=LGUI(3) T=LGUI(4) E=LGUI(5) C=LGUI(6), rest TRNS.
 - Layer 2 (hold Caps): S=MACRO(0) snipping tool, N=KC_NUM, Q=LALT(F4) close window.
 - Macro 0 (snip): Down(LGUI) Down(LSFT) Tap(S) Up(LSFT) Up(LGUI).
 
-Export note: usevia.app blocks programmatic JS execution, so export the JSON with VIA's own
-**Save** button (not a console script).
+Export note: VIA's own **Save** button always works. Programmatic JS export is
+intermittent — `window.__editedJSON` holds the keymap string when the site allows JS exec
+(it was blocked one session, available the next), so don't rely on it.
 
 ---
 
 ## 10. Open Questions / Next Steps
 
-_Both checksums (announce CRC16 and the data-block accumulator) are now CRACKED — see §5e.
-What remains:_
+_Both the announce CRC16 and the data-packet checksum are CRACKED (§5e), the view-switch
+command table is captured (§7), and GIF frame addressing is decoded (§7). What remains:_
 
-1. **Announce size field byte[3,4,5]** — a 3-byte LE value, but **not a plain byte count**.
-   Decode by uploading images of known, differing sizes and diffing the announce.
-2. **Accumulator seed origin** — why 121 (0x79)? Fixed firmware constant vs derived from
-   something. (It's constant across image and GIF transfers, so hardcoding 121 works today.)
-3. **GIF per-frame addressing** — reconcile why the GIF capture's data-block offsets top out
-   at 0x03F0 rather than the still-image 0x77A8 (see the caveat in §7).
-4. **GIF frame-count field** — structure is decoded (§7), but the exact frame-COUNT byte is
-   not pinned. Candidates: 0x40 announce flags, or the 0x0A setup (`byte[13,14] = 04 30 02`).
-   Decode by uploading GIFs with different frame counts.
-5. **GIF frame-rate encoding** — the dialog sets it globally; find the byte by capturing
+1. **Announce bytes[4,5]** — a reproducible **per-command constant** (homepage 339, picture
+   566, GIF-page 601, time/image 758) whose generating formula nobody has matched (not a CRC
+   or header sum). Not required to reproduce commands — reuse the captured value — but its
+   origin is unknown. (Also: byte[3] is a constant 0x07 marker, not a length.)
+2. **GIF bank-base encoding** — addressing is decoded as banked ~1 KB windows (§7), but which
+   bytes of the `0x0A`/`0x07` setup carry each bank's base (vs byte[1,2]'s intra-bank offset)
+   isn't pinned. Decodable from the existing capture.
+3. **GIF frame-count field** — the count (3 here) shows as three `0x0A→0x07` setup pairs, but
+   the explicit count byte isn't pinned. Candidates: 0x40 announce param, or the 0x0A setup
+   (`byte[13,14] = 04 30 02`). Confirm by capturing GIFs with different frame counts.
+4. **GIF frame-rate encoding** — the dialog sets it globally; find the byte by capturing
    uploads at different FPS. (byte[10]=0x78=120 recurs in both still + GIF setup — likely a
    fixed height/param, not the rate.)
-6. **Full view-switch command map** — homepage / picture / GIF switch commands.
-7. **Persistence** — does date/time survive power cycle? Does the LCD keep the 12hr base
-   after unplug? (The re-sync loop makes this moot in practice.)
+5. **Time payload bit-mapping** — the two time transactions (type 9/subcmd 3 payload
+   `[0x12,0x2F]`; type 10/subcmd 4 payload `[26,3,7,1]`) → exact H/M/S/date field mapping is
+   still approximate. The working 12h sync produces correct output regardless.
+6. **Clear commands** — "Clear the picture" / "Clear GIF" bytes not captured (avoided, would
+   wipe content). Expected to be announce + finish, same shape.
+7. **Persistence** — does date/time survive power cycle? (The re-sync loop makes this moot.)
 
 ---
 
@@ -459,8 +513,9 @@ is no device opcode for it (see §7, Display attributes are client-side).
 5. **Data blocks (0x41):** for each 56-byte chunk `k` (k = 0,1,2,…,547):
    - offset = k × 56, little-endian in bytes[1,2]
    - byte[3] = 0x38 (56); final block (k=547 leftover) uses 0x10 (16)
-   - accumulator (bytes[4,5], 16-bit LE) = **121 + k × 56**
    - byte[6] = 0x00, then the 56 payload bytes
+   - checksum (bytes[4,5], 16-bit LE) = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF`
+     — compute it **after** laying down the payload (see §5e)
 6. **Finish (0x42):** `42 00 00 38 7A` (rest zero-padded).
 7. Remember `pad()`: OS-level HID libs prepend a 0x00 report-ID byte, then zero-fill to 64.
 
