@@ -1,0 +1,34 @@
+# AL80 LCD
+
+> Reverse-engineering the YUNZII AL80 keyboard's LCD panel over raw HID, plus the tooling it produced. Headline result: a 12-hour clock on the LCD without reflashing (the stock ripple-lighting firmware stays in place). The still-image and GIF streaming protocols are decoded (display is 112×137, RGB565 big-endian). Device: VID 0x28E9 / PID 0x30AF; LCD is HID interface usagePage 0xFF60 / usage 0x61; screen ops are a 0x40 announce → 0x41 data → 0x42 finish sequence over 64-byte reports.
+
+Read the knowledge base first — it is self-contained and holds every confirmed fact, packet layout, and open question. The other files are runnable tooling and the raw research material behind it.
+
+## Primary reference
+- [AL80_KNOWLEDGE_BASE.md](AL80_KNOWLEDGE_BASE.md): the full write-up. Starts with a Quick Reference constants table and a Glossary, then device identity, display specs, command set, time-sync + 12hr hack, still-image and GIF stream protocols, tooling, VIA keymap, open questions, safety.
+- [README.md](README.md): project overview, quick start, and a Links table (VIA, YUNZII software, LCD web app, QMK docs).
+
+## Tooling (runnable)
+- [tooling/al80_clock.js](tooling/al80_clock.js): Node clock-sync (node-hid). Loop or `--once`.
+- [tooling/al80_clock.py](tooling/al80_clock.py): Python clock-sync (hidapi). Same behavior.
+- [tooling/browser_console_snippet.js](tooling/browser_console_snippet.js): no-install WebHID version — paste into the yunzii-game.com console.
+- [tooling/README.md](tooling/README.md): launchers, auto-start-at-login, gotchas.
+
+## Research material (raw)
+- [research/README_captures.txt](research/README_captures.txt): what the capture archive contains.
+- [research/captures/hid_captures_annotated.txt](research/captures/hid_captures_annotated.txt): human-annotated HID packet dump.
+- [research/captures/device_descriptors.json](research/captures/device_descriptors.json): the 4 HID interfaces as enumerated.
+- [research/image_capture/](research/image_capture/): still-image test pattern + raw capture that confirmed 112×137 / RGB565 BE.
+- [research/gif_capture/GIF_FINDINGS.md](research/gif_capture/GIF_FINDINGS.md): GIF upload protocol findings; raw GIF capture alongside it.
+- [research/site_assets/](research/site_assets/): YUNZII's own yunzii-game.com JS bundle (third-party; source for the packet-builder constants).
+
+## Supporting files
+- [keymap/AL80_QMK__V0106_20251219.json](keymap/AL80_QMK__V0106_20251219.json): VIA keymap export (layout described in the knowledge base, §9).
+- [firmware/](firmware/): reference copy of the ripple-lighting firmware. Do not reflash casually.
+- [apps/](apps/): version-pinned vendor tools (YUNZII LCD app, QMK Toolbox).
+- [lcd-images/](lcd-images/): GIFs currently loaded on the panel.
+
+## Do not
+- Do not use commands 0xB0–0xB7 (bootloader / DFU) — brick risk, and they would wipe the ripple firmware.
+- Do not reflash. The whole approach exists to avoid it.
+- Only one process can hold the 0xFF60 interface at a time — close the yunzii-game.com tab before running the scripts.

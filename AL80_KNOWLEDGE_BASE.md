@@ -1,10 +1,47 @@
+---
+title: YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
+status: active
+updated: 2026-07-01
+device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
+scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
+confirmed: display 112×137 RGB565 big-endian; time-sync protocol; still-image and GIF packet structure
+---
+
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
 
-> Self-contained reference so this project can be resumed cold by a human or another AI.
-> Consolidated from all sessions: the HID protocol reverse-engineered for the AL80's LCD,
-> the 12-hour clock hack, the CONFIRMED image pixel format (RGB565 BE) and display
-> resolution (112×137), the image-stream packet structure, the tooling built, the
-> read-only command-sweep result, open questions, and future modification ideas.
+Self-contained reference so this project can be resumed cold by a human or another AI.
+Consolidated from all sessions: the HID protocol reverse-engineered for the YUNZII AL80's
+LCD panel, the 12-hour clock hack, the confirmed image pixel format (RGB565 big-endian) and
+display resolution (112×137), the still-image and GIF packet structure, the tooling built,
+the read-only command-sweep result, open questions, and future modification ideas.
+
+## Quick Reference (all key constants)
+
+| Thing | Value |
+|-------|-------|
+| Device | YUNZII AL80 mechanical keyboard with color LCD |
+| Vendor ID / Product ID | 0x28E9 / 0x30AF |
+| LCD HID interface | usagePage 0xFF60, usage 0x61 (raw / VIA) |
+| Report ID / report size | 0 (unnumbered) / 64 data bytes |
+| Display resolution | 112 × 137 px, portrait |
+| Pixel format | RGB565, **big-endian**, 2 bytes/px, row-major, top-left origin |
+| Full frame size | 30,688 bytes = 548 data blocks of 56 bytes (last block 16 bytes) |
+| Screen-op sequence | 0x40 announce → 0x41 data → 0x42 finish |
+| Time checksum | `CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF` |
+| 12-hour hour value | `HH = (hour24 % 12) || 12` |
+| Re-sync interval | ~60 s (keyboard free-runs its own clock and drifts) |
+| DO NOT TOUCH | commands 0xB0–0xB7 (bootloader / DFU — brick risk) |
+
+## Glossary
+
+- **VIA** — usevia.app, the browser configurator used for all keymap changes (no firmware recompile).
+- **WebHID** — the browser HID API the yunzii-game.com LCD app uses; it strips the report-ID byte.
+- **HID** — USB Human Interface Device; the AL80 exposes 4 HID interfaces (see §2, Device Identity).
+- **RGB565 BE** — 16-bit color, 5 bits red / 6 green / 5 blue, stored big-endian (2 bytes per pixel).
+- **DFU** — Device Firmware Upgrade (bootloader) mode; entered by commands 0xB0–0xB7. Avoid — brick risk.
+- **NAK** — a negative/non-acknowledgement response (device returns `FF 00 00 …` for unsupported commands).
+- **CKSUM** — a one-byte additive checksum carried in a packet (formulas given per packet type below).
+- **announce / data / finish** — the three packet roles in every screen operation: 0x40 / 0x41 / 0x42.
 
 ---
 
@@ -35,7 +72,7 @@
 The AL80 exposes **4 HID interfaces**. Only the 0xFF60/0x61 one drives the LCD
 and accepts the screen-control commands. The others:
 
-- **0xFF31 / 0x74** — vendor, input-only. (Status/version/config probably live here — see §4 command-sweep.)
+- **0xFF31 / 0x74** — vendor, input-only. (Status/version/config probably live here — see §4, Command-sweep finding.)
 - **0x0001 / 0x06** — boot keyboard.
 - **0x0001 / 0x02 + 0x80** and **0x000C / 0x01** — composite: mouse / system / consumer.
 
@@ -111,7 +148,7 @@ different interface (likely 0xFF31). **Do NOT probe 0xB1–0xB7** (brick risk).
 
 Observed structure of the 0x40 header:
 - byte[3]     = length / type marker (0x07 for time/date announce)
-- byte[4]     = checksum-ish (≈ sum of other bytes; see open question §10)
+- byte[4]     = checksum-ish (≈ sum of other bytes; see §10, Open Questions, item 1)
 - byte[5]     = varies 0x01 / 0x02 (payload count?)
 - byte[7,8]   = **0xA5 0x5A** magic constant (always present)
 - byte[9]     = sequence counter (increments across operations: 09, 0a, 0d, 0e…)
@@ -177,10 +214,11 @@ Sequence: **0x40 announce → many 0x41 data blocks → 0x42 finish.**
 - byte[1,2] = **LITTLE-ENDIAN destination offset**, increments by 0x38 (=56) each block
 - byte[3]   = chunk length (0x38 = 56 data bytes; final block uses 0x10)
 - byte[4]   = running checksum
-- Pixel bytes are **RGB565 BE, row-major from top-left** (see §3).
+- Pixel bytes are **RGB565 BE, row-major from top-left** (see §3, Display Specs).
 - One full frame = **548 data blocks** for 112×137.
 
-Observed data-block offsets from a real capture (offset in byte[1..2], little-endian):
+Observed data-block offsets — **excerpt** of the opening blocks (offset in byte[1..2],
+little-endian). These first few lines are only the start of the stream, not the final block:
 
     41 00 00 38 79 ...        offset 0x0000
     41 38 00 38 b1 ...        offset 0x0038
@@ -188,7 +226,11 @@ Observed data-block offsets from a real capture (offset in byte[1..2], little-en
     41 a8 00 38 21 01 ...     offset 0x00A8
     41 e0 00 38 59 01 ...     offset 0x00E0
     ...                       (+0x38 each)
-    41 f0 03 10 44 01 ...     final chunk, length 0x10
+
+**Measured from the full capture** (`research/image_capture/testpattern_capture_raw.json`):
+a complete still frame runs from offset 0x0000 to **0x77A8** (30,632 = block 547), i.e. the
+full **548 blocks** for a 112×137 frame, then a 0x42 finish. (The capture holds 1,096 data
+records = 548 blocks each sent twice.) So the still-image address space is fully confirmed.
 
 Interpretation: **0x41 is a generic block-write** — the LCD is effectively a dumb
 framebuffer we can push arbitrary pixels to.
@@ -201,8 +243,8 @@ The site parsed it correctly (thumbnail column showed all 3 frames). Artifacts i
 `GIF_FINDINGS.md`).
 
 **Upload flow (UI):** upload GIF → preview shows frames → "Save to the device" opens a
-**"Frame rate setting"** dialog (default **30 FPS**) → confirm → transfer. The frame rate
-is chosen at upload time via the dialog, **NOT embedded per-frame**.
+**"Frame rate setting"** dialog (default **30 FPS**) → confirm (the **"Sure"** button) →
+transfer. The frame rate is chosen at upload time via the dialog, **NOT embedded per-frame**.
 
 **Transfer structure (HID)** — a distinct header/setup sequence (all carry the A5 5A magic;
 differs from the single still-image header):
@@ -213,15 +255,23 @@ differs from the single still-image header):
     41 00 00 07 98 02 00 A5 5A 11 78 00 C5 03        setup subcmd 0x07 (byte[10]=0x78=120, as in still img)
 
 Then, **per frame**, a run of image-data blocks identical in form to the still-image
-protocol above (`41 [offLo][offHi] 38 [cksum] <56 pixel bytes>`, offset stepping
-0x00, 0x38, 0x70, … 0x3F0; final block length 0x10). Each frame = ~30,688 bytes =
-one full 112×137 RGB565 big-endian image.
+protocol above (`41 [offLo][offHi] 38 [cksum] <56 pixel bytes>`, final block length 0x10).
 
 **Frames are sent SEQUENTIALLY.** Each new frame is preceded by **setup subcmd 0x0A then
 0x07** (these reappear at the 2nd-frame boundary, e.g. `…0A 95 01…` / `…07 98 02…`) — i.e.
 0x0A→0x07 restart the pixel stream for the next frame.
 
-So: **a GIF = N sequential full frames + a single global frame-rate setting.**
+So: **a GIF = N sequential frames + a single global frame-rate setting.**
+
+> **Caveat — GIF per-frame size not yet reconciled.** The GIF *findings* note asserted
+> "each frame ≈ 30,688 bytes" (a full 112×137 image), but the raw capture
+> (`research/gif_capture/testgif_capture_raw.json`) does not match that: its data-block
+> offsets top out at only **0x03F0 (1,008)** and reset ~84 times across 3,192 records,
+> nowhere near the still-image max of 0x77A8. So GIF frames in this capture are addressed
+> in much smaller offset windows than a full still frame. Whether that's per-frame
+> compression, the solid-color test frames, or a different address meaning in GIF mode is
+> **not decoded** — see §10, Open Questions, items 4–5. The still-image path (above) is the
+> only fully-confirmed frame layout.
 
 Gotcha for analysis: a capture may contain a stray time-sync (`0x41 sub3 "06 17 09"`)
 from the auto-sync loop firing mid-transfer — ignore those.
@@ -234,7 +284,7 @@ from the auto-sync loop firing mid-transfer — ignore those.
 
 ---
 
-## 8. Tooling Built (shipped in `tooling/`)
+## 8. Tooling Built (in `tooling/`, originally packaged as `al80_12hr_clock.zip`)
 
 - **al80_clock.js** — Node (node-hid). Loop or `--once`, file logging, Windows toast
   after 3 consecutive failures, crash handlers.
@@ -281,7 +331,7 @@ custom keycode, so direct JSON editing was used):
 2. **0x40 byte[12,13]** — presumed CRC16 of payload. Identify polynomial/seed.
 3. **Image announce/setup header** — exact width/height/length encoding. We have samples
    in the capture (announce byte[3]=0x08, setup byte[10]=0x78); correlate to derive fields.
-4. **GIF frame-count field** — structure is decoded (§7), but the exact frame-COUNT
+4. **GIF frame-count field** — structure is decoded (§7, Image / GIF Streaming), but the exact frame-COUNT
    byte is not pinned. Likely in the 0x40 announce (byte[12,13] = `04 50`) or the 0x0A
    setup (byte[13,14] = `04 30 02`). Decode by uploading GIFs with different frame counts.
 5. **GIF frame-rate encoding** — the dialog sets it globally; find the byte by capturing

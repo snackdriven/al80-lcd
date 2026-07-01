@@ -13,6 +13,7 @@ Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling t
 | [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |
 | [`keymap/`](keymap/) | VIA/QMK keymap export (the layout from the knowledge base, §8). |
 | [`apps/`](apps/) | Version-pinned vendor tools: YUNZII's LCD screen app and QMK Toolbox. |
+| [`llms.txt`](llms.txt) | Curated index for AI agents ([llms.txt](https://llmstxt.org/) format) — points at the knowledge base and key files. |
 
 ## The short version
 
