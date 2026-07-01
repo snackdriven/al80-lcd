@@ -10,6 +10,7 @@ Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling t
 | [`tooling/`](tooling/) | Runnable clock-sync scripts (Node + Python), launchers, and a no-install browser-console version. |
 | [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, and the site's JS bundle. |
 | [`firmware/`](firmware/) | Reference copy of the ripple-lighting firmware this project is built around. Do not reflash casually. |
+| [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |
 
 ## The short version
 
