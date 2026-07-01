@@ -57,6 +57,17 @@ See [`tooling/README.md`](tooling/README.md) for launchers and auto-start-at-log
 - **Partially decoded:** image/GIF block-write protocol (`0x41` is a generic framebuffer write with a little-endian offset), view-switch commands.
 - **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], and the image announce header (dimensions + pixel format, likely RGB565) — the last one gates a "live info panel" build. Details in the knowledge base, §9.
 
+## Links
+
+Everything you need to work on this keyboard, in one place:
+
+| Link | What it's for |
+|------|---------------|
+| [usevia.app](https://usevia.app/) | VIA configurator — the only way keymap changes are made here (load `keymap/AL80_QMK__V0106_20251219.json`). No firmware recompile. |
+| [yunzii.com/pages/software](https://www.yunzii.com/pages/software) | YUNZII's downloads: firmware (incl. the ripple build in `firmware/`) and the LCD screen app (`apps/`). |
+| [yunzii-game.com/#/screen](https://yunzii-game.com/#/screen) | The WebHID LCD screen app — uploads images/GIFs to the panel. Its JS bundle is captured in `research/site_assets/`. Close this tab before running the clock scripts (one opener of the `0xFF60` interface at a time). |
+| [docs.qmk.fm](https://docs.qmk.fm) | QMK reference — keycodes, layers, `LT()`/macros used in the keymap. |
+
 ## Safety
 
 Commands `0xB0–0xB7` are bootloader / firmware-upgrade (DFU). **Don't touch them** — they can brick the device or wipe the ripple firmware, which is the whole reason for the HID-script approach. Stick to `0x40`/`0x41`/`0x42`.
