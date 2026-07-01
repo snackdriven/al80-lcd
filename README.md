@@ -6,9 +6,10 @@ Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling t
 
 | Path | What it is |
 |------|-----------|
-| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up: device identity, HID protocol, the 12hr hack, image-stream notes, open questions, and safety warnings. Start here. |
+| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up (**v2**): device identity, HID protocol, the 12hr hack, **confirmed display specs + image-stream format**, a custom-frame render recipe, open questions, and safety warnings. Start here. |
+| [`AL80_KNOWLEDGE_BASE_v1.md`](AL80_KNOWLEDGE_BASE_v1.md) | Superseded v1, kept for a few granular capture samples and per-interface details v2 compressed out. |
 | [`tooling/`](tooling/) | Runnable clock-sync scripts (Node + Python), launchers, and a no-install browser-console version. |
-| [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, and the site's JS bundle. |
+| [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, the site's JS bundle, and the `image_capture/` test pattern used to confirm the display resolution. |
 | [`firmware/`](firmware/) | Reference copy of the ripple-lighting firmware this project is built around. Do not reflash casually. |
 | [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |
 | [`keymap/`](keymap/) | VIA/QMK keymap export (the layout from the knowledge base, §8). |
@@ -30,6 +31,8 @@ finish    42 00 00 38 7A
 The LCD displays the raw hour value it's given, so sending `1–12` instead of `0–23` yields a 12-hour clock. There's no AM/PM indicator, and the keyboard free-runs its own clock from the last value set, so the scripts re-sync every ~60s to fight drift.
 
 VID `0x28E9` / PID `0x30AF`. Keyboard must be wired. Only one process can hold the `0xFF60` interface at a time, so close the yunzii-game.com tab before running a script.
+
+**Display (confirmed):** 112×137 px, portrait, **RGB565 big-endian**, row-major from top-left — 30,688 bytes per full frame. The web app resamples any uploaded image down to native res, so render custom graphics directly at 112×137. Full render recipe in the knowledge base, §12.
 
 ## Quick start
 
@@ -54,8 +57,8 @@ See [`tooling/README.md`](tooling/README.md) for launchers and auto-start-at-log
 ## Status
 
 - **Done & shipped:** 12hr clock sync (confirmed working), full tooling.
-- **Partially decoded:** image/GIF block-write protocol (`0x41` is a generic framebuffer write with a little-endian offset), view-switch commands.
-- **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], and the image announce header (dimensions + pixel format, likely RGB565) — the last one gates a "live info panel" build. Details in the knowledge base, §9.
+- **Confirmed (v2):** display resolution (112×137) and pixel format (RGB565 BE), image-stream packet structure, and that the `0xFF60` LCD interface only accepts `0x40`/`0x41`/`0x42` (NAKs everything else). The "live info panel" idea is now fully feasible — format and resolution are known.
+- **Open:** the `0x40` announce checksum formula, the presumed CRC16 at byte[12,13], the exact width/height/length encoding in the image announce/setup header, and GIF frame framing/timing. Details in the knowledge base, §9.
 
 ## Links
 
