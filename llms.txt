@@ -22,6 +22,9 @@ Read the knowledge base first — it is self-contained and holds every confirmed
 - [research/gif_capture/GIF_FINDINGS.md](research/gif_capture/GIF_FINDINGS.md): GIF upload protocol findings; raw GIF capture alongside it.
 - [research/site_assets/](research/site_assets/): YUNZII's own yunzii-game.com JS bundle (third-party; source for the packet-builder constants).
 
+## Meta
+- [docs/llm-friendly-documentation-2026.md](docs/llm-friendly-documentation-2026.md): how the knowledge base is structured for AI + human readers (reusable guide).
+
 ## Supporting files
 - [keymap/AL80_QMK__V0106_20251219.json](keymap/AL80_QMK__V0106_20251219.json): VIA keymap export (layout described in the knowledge base, §9).
 - [firmware/](firmware/): reference copy of the ripple-lighting firmware. Do not reflash casually.
