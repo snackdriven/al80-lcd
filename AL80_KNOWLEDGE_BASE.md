@@ -25,7 +25,7 @@ the read-only command-sweep result, open questions, and future modification idea
 | Report ID / report size | 0 (unnumbered) / 64 data bytes |
 | Display resolution | 112 × 137 px, portrait |
 | Pixel format | RGB565, **big-endian**, 2 bytes/px, row-major, top-left origin |
-| Full frame size | 30,688 bytes = 548 data blocks of 56 bytes (last block 16 bytes) |
+| Full frame size | 30,688 bytes = 548 data blocks of 56 bytes (still image: all 56; no tail) |
 | Screen-op sequence | 0x40 announce → 0x41 data → 0x42 finish |
 | Announce type byte[9] | 0x09 = time, 0x10 = image, 0x12 = GIF |
 | Announce CRC bytes[12,13] | CRC16-MODBUS of bytes[9..11], stored big-endian |
@@ -270,7 +270,9 @@ Sequence: **0x40 announce → many 0x41 data blocks → 0x42 finish.**
 
 - byte[1,2]   = **LITTLE-ENDIAN destination byte-offset** into the frame buffer; steps by
                 56 each block (0, 56, 112, 168, 224, 280 …).
-- byte[3]     = payload length (0x38 = 56 data bytes; final block uses 0x10 = 16).
+- byte[3]     = payload length. For a **still image, every block is 0x38 (56)** — 548 × 56 =
+                30,688 exactly, so there is **no** short tail block. (The 0x10 = 16-byte block
+                only appears in GIF bank tails; see the GIF section below.)
 - byte[4,5]   = **16-bit LE additive checksum** = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF`
                 (see §5e — verified 4288/4288 blocks; NOT the old "seed 121" accumulator).
 - byte[6]     = 0x00 reserved.
@@ -343,8 +345,11 @@ to 0** for the next bank. Analysis of `research/gif_capture/testgif_capture_raw.
   base is carried by the setup packets, not by byte[1,2].
 
 So the still image uses one flat offset space to 0x77A8; the GIF uses banked ~1 KB windows
-with the same 56-byte block form inside each bank. What's still open is the exact bank-base /
-frame-count encoding in the `0x0A` setup (see §10, Open Questions).
+with the same 56-byte block form inside each bank. Each **1 KB bank = 18 × 56 + one 16-byte
+(0x10) tail block** (1008 + 16 = 1024) — this is the only place the 0x10 block length appears
+(the still image has none). Measured: the GIF capture's blocks are 3,024 × 56-byte + 168 ×
+16-byte = 84 banks × 2 sends. What's still open is the exact bank-base / frame-count encoding
+in the `0x0A` setup (see §10, Open Questions).
 
 Gotcha for analysis: a capture may contain a stray time-sync (`0x41 sub3 "06 17 09"`)
 from the auto-sync loop firing mid-transfer — ignore those.
@@ -510,9 +515,10 @@ is no device opcode for it (see §7, Display attributes are client-side).
 4. **Announce (0x40):** `40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01` — type[9]=0x10 (image);
    the CRC bytes[12,13]=`C5 B1` are CRC16-MODBUS over `[0x10,0x00,0x01]`. (Reuse the captured
    still-image announce until the size field byte[3,4,5] is decoded — §10, item 1.)
-5. **Data blocks (0x41):** for each 56-byte chunk `k` (k = 0,1,2,…,547):
+5. **Data blocks (0x41):** 548 blocks, `k = 0…547`, **all 56 bytes** (548 × 56 = 30,688 exact,
+   no short tail — the 0x10 tail is GIF-only):
    - offset = k × 56, little-endian in bytes[1,2]
-   - byte[3] = 0x38 (56); final block (k=547 leftover) uses 0x10 (16)
+   - byte[3] = 0x38 (56)
    - byte[6] = 0x00, then the 56 payload bytes
    - checksum (bytes[4,5], 16-bit LE) = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF`
      — compute it **after** laying down the payload (see §5e)
