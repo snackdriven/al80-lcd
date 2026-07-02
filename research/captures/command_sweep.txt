@@ -1,0 +1,6 @@
+Read-only command sweep on the 0xFF60 LCD interface:
+- 0x55 (getDongleAndKeyboardStatus): returned FF 00 00... = NAK
+- 0xB0 (getFirmwareVersion): returned FF 00 00... = NAK (tested earlier)
+CONCLUSION: the 0xFF60 screen interface ONLY accepts screen-control cmds (0x40/0x41/0x42)
+and NAKs everything else. Status/version/config commands must live on a different
+interface (likely 0xFF31). Do NOT probe 0xB1-0xB7 (bootloader/DFU - brick risk).

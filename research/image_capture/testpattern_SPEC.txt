@@ -1,0 +1,10 @@
+Test pattern spec (the exact input that produced the capture):
+- Size: 135 x 240 px (portrait, ~LCD ratio)
+- Top third:    pure RED   rgb(255,0,0)  -> RGB565 0xF800 -> bytes F8 00
+- Middle third: pure GREEN rgb(0,255,0)  -> RGB565 0x07E0 -> bytes 07 E0
+- Bottom third: pure BLUE  rgb(0,0,255)  -> RGB565 0x001F -> bytes 00 1F
+- Marker: WHITE px @(0,0)   -> 0xFFFF (FF FF)
+- Marker: BLACK px @(W-1,0) -> 0x0000 (00 00)
+
+CONFIRMED in capture: pixel run begins with FF FF (white marker) then a long run of
+F8 00 (red) -> pixel format is RGB565 BIG-ENDIAN, 2 bytes/pixel, row-major from top-left.
