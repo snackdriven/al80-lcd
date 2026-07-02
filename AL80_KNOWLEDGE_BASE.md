@@ -4,7 +4,7 @@ status: active
 updated: 2026-07-01
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
-confirmed: entire protocol re-derived from the site JS source (§5f) — one additive checksum (yne) for all packets, CRC16-MODBUS announces, full command map, date payload, clear commands; display 112×137 RGB565 BE; GIF = banked ~1KB windows
+confirmed: FULLY DECODED — protocol re-derived from web JS + desktop Qt app (§14). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 112×137 RGB565 BE.
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
@@ -578,11 +578,15 @@ all solved. What genuinely remains:_
 3. ~~Clear commands~~ — **SOLVED (§5f/§7):** clear-picture = type 14 ×16; clear-GIF = type 18/19.
 4. ~~GIF bank-base encoding~~ — **RESOLVED (§7):** implicit/sequential (1024 bytes per completed
    0→0x3F0 cycle), proven by byte-identical consecutive banks.
-5. **GIF frame-count + frame-rate encoding** — the last real unknowns. The "Frame rate setting"
-   dialog (default 30 FPS) sets it globally; which byte carries FPS, and how the frame count is
-   encoded, isn't pinned yet. Being chased in the bundle's GIF-upload code; failing that,
-   capture GIFs at different frame counts / FPS.
-6. **Persistence** — does date/time survive power cycle? (The re-sync loop makes this moot.)
+5. ~~GIF frame-count + frame-rate encoding~~ — **SOLVED from source (§14c):** frame count = the
+   trailing byte of the type-18 GIF finish packet; FPS = the trailing byte of the type-19 finish
+   packet (slider 1–60, default 30). Both single bytes, sent at end of transfer.
+6. **Persistence** — does date/time survive power cycle? (The re-sync loop makes this moot.) The
+   one item left, and it barely matters.
+
+**Net: the protocol is fully decoded** — checksums, CRC, full command map, still-image + GIF
+upload byte-maps, view-switch, clear, time/date, DFU (documented to avoid). Confirmed across
+captures, the web JS bundle, and the desktop Qt app.
 
 ---
 
@@ -637,3 +641,77 @@ captured announce is known-good, so reuse it verbatim for 112×137 until that fi
   and HID-script approach.
 - **Only one opener** of the 0xFF60 interface at a time: close the browser tab before
   running scripts.
+
+**The exact DFU sequence to avoid** (decoded from source — this is what a firmware update
+does, so never send it): `0xB1 toBootLoader` → poll `0xB2 getBootLoaderStatus` (every 200ms,
+≤20 tries) → `0xB3 confirmFirmwareInfo` with a **56-byte header** (bytes[6..9]=file size LE,
+bytes[10..13]=CRC32 LE) → `0xB4 startUpgrade` → `0xB5 transferUpgradeData` (chunked) →
+`0xB6 upgradeComplete` → `0xB7 endUpgrade`. A second, colliding `mechanicalKeyboard*` DFU set
+(opcodes 0x00–0x04/0x10/0x20/0x55) exists for a different device family — irrelevant to the AL80,
+just don't confuse the two.
+
+---
+
+## 14. Full Protocol Reference (decoded from source)
+
+Cross-checked against two independent front-ends: the **web app** JS bundle
+(`research/site_assets/index-8Bj3uPPc.js`) and the **desktop app** (`apps/AL80_LCD_SCREEN…exe`,
+a Qt5 native app `MK856.exe` whose export/RTTI symbols name every routine — `HidWriteLCDHead/
+Data/EndInfo` = 0x40/0x41/0x42, `WriteDeviceLCDPicture/Gif/GifHead/GifEnd/GIFFrameRate/Time/Date`,
+`OnSendScreenSwitchInfoToDevice`, `OnSendScreenDelAllPicInfoToDevice`; pixels are `uint16_t*`
+RGB565; GIF frames decoded with FFmpeg). Both are front-ends over the identical HID protocol.
+
+### 14a. Command map (the AL80 uses the `GamingKeyboard2` opcode profile)
+
+`0x10 beginConnect · 0x11 endConnect · 0x12/0x13 get/setDeviceMessage · 0x14/0x15 get/setData ·
+0x16 getKeyboard · 0x17/0x18 get/setKeyMessage · 0x19/0x1A get/setLightMessage · 0x1B/0x1C
+get/setMacro("hong") · 0x1D/0x1E tbLight on/off · 0x1F getPoorNum · 0x20 restKeyBoard(factory
+reset) · 0x21 getLightRect · 0x30/0x31 get/setProfile · 0x32–0x35 Fn message · 0x36–0x3B
+magnetic-axis (analog-key) config · 0x40 announce · 0x41 data · 0x42 finish · 0x55
+getDongleAndKeyboardStatus · 0xB0–0xB7 firmware/DFU (see §13)`.
+
+`getDongleAndKeyboardStatus (0x55)` decodes **only a sleep bit** (`hasSleep = !response[7]`) —
+despite the name there's **no battery %** in this protocol. Per-radio backlight/sleep timers
+(wired/2.4G/BT) live in the device-config blob at byte offsets 23/15,17/19,21, not as opcodes.
+
+### 14b. Still-image upload (type 0x10) — full byte-map
+
+    announce (0x40):  A5 5A 10 00 01 [crcHi crcLo] 01
+    length   (0x41):  A5 5A 0C [lenHi lenLo] [crc]        ; len = width·height·2, BIG-ENDIAN
+    pixels   (0x41):  RGB565 big-endian bytes, auto-chunked (see 14d)
+    finish   (0x42):  (empty)
+
+RGB565 is packed `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` off a canvas resized to the panel size with
+`imageSmoothingEnabled=false`, then split high-byte-first (`v>>8`, `v&255`).
+
+### 14c. GIF upload (types 0x12/0x13) — frame-count + FPS SOLVED
+
+    start  (0x40):  A5 5A 12 00 02 [crc] [mode] 00        ; mode 0/1/2
+    start  (0x41):  A5 5A 13 00 02 [crc] [mode] 00
+    per frame:
+      header (0x41): A5 5A 10 00 03 [crc] 02 [mode] [frameIdx]
+      length (0x41): A5 5A 11 [lenHi lenLo] [crc]         ; per-frame len, BIG-ENDIAN
+      pixels (0x41): RGB565 BE, 1024-byte logical chunks then physical chunking (14d)
+      (every 16th frame: ~3s pause for the device's flash write)
+    FINISH (0x41):  A5 5A 12 00 02 [crc] [mode] [FRAME_COUNT]   ; ← count in the trailing byte
+    FINISH (0x41):  A5 5A 13 00 02 [crc] [mode] [FPS]           ; ← FPS in the trailing byte
+    finish (0x42):  (empty)
+
+- **FRAME COUNT** = trailing byte of the type-18 finish packet (`Fe`, capped 64/160/42 by mode).
+- **FPS** = trailing byte of the type-19 finish packet (`Z`, the "帧率设置 / Frame rate setting"
+  slider, range **1–60**, default **30**). Both are single bytes, sent at the *end* of the transfer.
+
+> **Variant note.** This web component emits GIF control subcmds **0x02/0x03**, whereas this
+> repo's own GIF *capture* showed setup subcmds **0x09/0x0A/0x07** and the banked 1 KB windows
+> (§7). The bundle has several product code paths; the captured device/firmware may take a
+> different one. Our capture is ground truth for *this* keyboard; the source byte-maps above are
+> the app's general implementation. Reconcile with a fresh capture if forging GIFs.
+
+### 14d. Chunking (both still + GIF)
+
+Every logical byte array is split into **`(reportLen − 7)`-byte** payloads (56 at reportLen=63).
+Each 0x41 report carries its **absolute byte offset** little-endian in `bytes[1,2]`; the final
+chunk's length byte = `len − offset + 7`. GIF frames are additionally pre-sliced into 1024-byte
+logical blocks before that. Length *descriptors* (the 0x0C/0x11 packets) store their value
+**big-endian**; the per-report *offset* is **little-endian**. bytes[4,5] is always the `yne`
+additive checksum (§5e).
