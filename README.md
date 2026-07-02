@@ -8,6 +8,7 @@ Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling t
 |------|-----------|
 | [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up (all sessions merged into one): device identity, HID protocol, the 12hr hack, confirmed display specs + still-image and GIF stream formats, a custom-frame render recipe, open questions, and safety warnings. Start here. |
 | [`tooling/`](tooling/) | Runnable clock-sync scripts (Node + Python), launchers, and a no-install browser-console version. |
+| [`converter/`](converter/) | `al80-image` CLI — converts any image to a still-image LCD transfer (RGB565 BE, 548 blocks). Offline-verifiable dry-run; `--send` writes to the device. |
 | [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, the site's JS bundle, the `image_capture/` test pattern (confirmed the resolution), and `gif_capture/` (decoded the animation protocol). |
 | [`firmware/`](firmware/) | Reference copy of the ripple-lighting firmware this project is built around. Do not reflash casually. |
 | [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |

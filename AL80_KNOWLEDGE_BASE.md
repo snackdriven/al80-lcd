@@ -344,12 +344,30 @@ to 0** for the next bank. Analysis of `research/gif_capture/testgif_capture_raw.
   showed 0x03F0 and looked like it contradicted "30,688 bytes/frame." It doesn't: the bank
   base is carried by the setup packets, not by byte[1,2].
 
-So the still image uses one flat offset space to 0x77A8; the GIF uses banked ~1 KB windows
+So the still image uses one flat offset space to 0x77A8; the GIF uses banked 1 KB windows
 with the same 56-byte block form inside each bank. Each **1 KB bank = 18 × 56 + one 16-byte
 (0x10) tail block** (1008 + 16 = 1024) — this is the only place the 0x10 block length appears
 (the still image has none). Measured: the GIF capture's blocks are 3,024 × 56-byte + 168 ×
-16-byte = 84 banks × 2 sends. What's still open is the exact bank-base / frame-count encoding
-in the `0x0A` setup (see §10, Open Questions).
+16-byte = 84 banks × 2 sends.
+
+**Bank addressing is IMPLICIT — decoded offline (resolves the old bank-base question).** There
+is **no per-bank address field** anywhere in the packets. Proof: the test GIF's first frame is
+a solid color, and consecutive banks are **byte-for-byte identical** (same `0→0x3F0` offsets,
+same payload, same checksums). If a bank index lived in any byte, bank 0 and bank 1 would
+differ; they don't. So the device keeps its own destination pointer and **advances it by 1024
+bytes each time byte[1,2] completes a 0→0x3F0 cycle** (i.e. each finished bank). byte[1,2] is
+therefore an **intra-bank offset only**, not a frame offset.
+
+Frame boundaries carry the setup packets; banks between them do not:
+
+    per frame:  ANNOUNCE(type 0x12) → SETUP 0x09 → SETUP 0x0A → SETUP 0x07 → [bank]×N
+    per bank:   19 data blocks (18 × 56 + 1 × 16), offset 0x0000 … 0x03F0, then straight into
+                the next bank's 0x0000 with NOTHING in between
+
+The `0x0A`/`0x07` setup pair resets the pointer for a new frame. So to forge a GIF you replay
+the frame-boundary setups and stream banks sequentially — the addressing takes care of itself.
+(Aside: on a zero/black payload the checksum is `0x41+offLo+offHi+0x38` = 121, 177, 233… — this
+is the entire origin of the debunked "seed 121 accumulator"; see §5e.)
 
 Gotcha for analysis: a capture may contain a stray time-sync (`0x41 sub3 "06 17 09"`)
 from the auto-sync loop firing mid-transfer — ignore those.
@@ -469,9 +487,10 @@ command table is captured (§7), and GIF frame addressing is decoded (§7). What
    566, GIF-page 601, time/image 758) whose generating formula nobody has matched (not a CRC
    or header sum). Not required to reproduce commands — reuse the captured value — but its
    origin is unknown. (Also: byte[3] is a constant 0x07 marker, not a length.)
-2. **GIF bank-base encoding** — addressing is decoded as banked ~1 KB windows (§7), but which
-   bytes of the `0x0A`/`0x07` setup carry each bank's base (vs byte[1,2]'s intra-bank offset)
-   isn't pinned. Decodable from the existing capture.
+2. ~~GIF bank-base encoding~~ — **RESOLVED (§7):** there is no bank-base field; addressing is
+   implicit/sequential (device advances 1024 bytes per completed 0→0x3F0 offset cycle). Proven
+   by byte-identical consecutive banks. What's left of the setup packets is just the exact
+   meaning of the frame-boundary `0x09`/`0x0A`/`0x07` bytes (not required to forge frames).
 3. **GIF frame-count field** — the count (3 here) shows as three `0x0A→0x07` setup pairs, but
    the explicit count byte isn't pinned. Candidates: 0x40 announce param, or the 0x0A setup
    (`byte[13,14] = 04 30 02`). Confirm by capturing GIFs with different frame counts.
