@@ -82,6 +82,12 @@ and accepts the screen-control commands. The others:
 WebHID strips the report ID; OS-level HID libs (hidapi/node-hid) must **prepend a
 0x00 report-ID byte**, giving a 65-byte write (1 + 64).
 
+The **same 0xFF60/0x61 interface also speaks the VIA protocol** (usevia.app uses it for all
+keymap/lighting config). VIA commands live in the `0x01–0x15` byte range; the LCD screen
+commands (`0x40/0x41/0x42`) sit above them, which is how one interface serves both — and why
+only one process can hold it at a time. Full VIA command set + coexistence notes:
+`research/via-protocol.md`.
+
 ---
 
 ## 3. Display Specs (CONFIRMED)
