@@ -4,7 +4,7 @@ status: active
 updated: 2026-07-01
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
-confirmed: display 112×137 RGB565 big-endian; time-sync protocol; still-image and GIF packet structure (GIF = banked ~1KB windows); announce CRC16-MODBUS; unified 16-bit data-packet checksum; view-switch command table
+confirmed: entire protocol re-derived from the site JS source (§5f) — one additive checksum (yne) for all packets, CRC16-MODBUS announces, full command map, date payload, clear commands; display 112×137 RGB565 BE; GIF = banked ~1KB windows
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
@@ -155,13 +155,15 @@ Every operation opens with the same header layout. Confirmed across 3,460 captur
 
 - byte[0]       = 0x40
 - byte[1,2]     = 0x00 0x00
-- byte[3]       = **0x07 CONSTANT** across every command observed (a format/version marker,
-                  **not** a length — rev2.1 refinement).
-- byte[4,5]     = a **per-command-type constant** (little-endian). Reproducible-constant per
-                  command, but not a CRC or arithmetic function of the header that anyone has
-                  matched (tested many CRC polys/ranges, payload CRC, header sum — no fit).
-                  Treat as fixed: reuse the captured value. (Seen: homepage 339, picture 566,
-                  GIF-page 601, time 758, image frame 758.) See §10, Open Questions.
+- byte[3]       = **payload length marker** = `(lastIndex - 7)`. In the site's builder `Bn`
+                  this is `(i-7)` where `i` defaults to 63 → **0x38 (56)** for a full data
+                  packet; for the short announces it comes out to 0x07. So it's a length, not a
+                  version constant. (Source: `Bn` in the site JS — see §5f.)
+- byte[4,5]     = **additive checksum `yne`, little-endian** = `(sum of all packet bytes with
+                  bytes[4,5] held at 0) & 0xFFFF`. **SOLVED from source** — this is NOT a
+                  per-command constant. rev2.1's "constants" (homepage 339, picture 566, GIF
+                  601, time 758) are simply `yne()` of each packet. Same function as the data
+                  checksum (§5e); one rule for every packet.
 - byte[6]       = 0x00 reserved
 - byte[7,8]     = **0xA5 0x5A** magic constant (in every announce)
 - byte[9]       = **type / channel** (see the command table in §7)
@@ -173,11 +175,11 @@ Time announce (byte[9] = 0x09):
 
     40 00 00 07 F6 02 00 A5 5A 09 00 03 C3 E1   (rest zero-padded to 64)
 
-> **Type-byte note.** An earlier delta doc labeled byte[9] `9 = image/GIF, 18 = time` — that
-> is backwards; the shipped clock scripts send the byte[9]=0x09 announce above and it syncs
-> the **clock**. Measured mapping in this repo: **0x09=time, 0x10=image, 0x12=GIF**. rev2.1
-> proposes type 9 is instead a *generic data-write channel* — see the fuller discrepancy note
-> and the command table in §7. The CRC math (§5e) holds regardless of the label.
+> **Type-byte note — SETTLED by source (§5f).** The site JS `f` (time handler) sends the
+> byte[9]=0x09 announce to set the **clock** (`type 9 = time`, `type 10 = date`). rev2.1's
+> "type 9 is a generic data-write channel" claim is **wrong**. Confirmed mapping: **0x09=time,
+> 0x0A=date, 0x0B=homepage-view, 0x0D=picture-view, 0x0F=GIF-view, 0x0E=clear-picture,
+> 0x10=image-upload, 0x12=GIF-upload/clear, 0x13=GIF sub-op**. The CRC math (§5e) holds regardless.
 
 ### 5e. Checksums — both CRACKED (were the top open questions in v2)
 
@@ -206,10 +208,64 @@ the archived captures: **1096/1096 still + 3192/3192 GIF = 4288/4288 exact match
 > pixel data the value is content-dependent (e.g. block 0 of the test pattern = 0x19B7, not
 > 121). The correct rule is the additive checksum above.
 
-This rule is **unified** with the time packet (§5b): for a time packet `len=3`,
-`payload=[HH,MM,SS]`, the formula gives `(0x41 + 0x03 + HH + MM + SS) & 0xFFFF`, whose low
-byte is exactly the documented time checksum (byte[5]=0 because the values are small). So
-there is **one checksum rule for all 0x41 data packets.**
+This rule is **unified across every packet — confirmed from the site source (§5f).** The
+builder computes bytes[4,5] with `yne()` for *all* opcodes, announce and data alike:
+
+    yne(o) = ( Σ o[i] ) & 0xFFFF, stored little-endian at o[4],o[5]   (o[4],o[5] = 0 while summing)
+
+So the announce bytes[4,5] we long treated as a "per-command constant" is the same checksum:
+homepage `[40,0,0,07,0,0,0,A5,5A,0B,0,0,02,00]` sums to **339 = 0x0153** → bytes `53 01`,
+matching the captured announce. rev2.1's constants (339/566/601/758) were just `yne()` values.
+And the CRC16 poly `0x8005`/`0xA001` is confirmed: the source `ga()` is
+`n=0xFFFF; for b: n^=b; ×8{ n&1 ? (n>>=1, n^=0xA001) : n>>=1 }; return [n>>8, n&255]`.
+
+### 5f. Source confirmation (reverse-engineered from the site JS bundle)
+
+The whole protocol above was re-derived from `research/site_assets/index-8Bj3uPPc.js` (the
+yunzii-game.com screen app), which confirmed the packet math and closed the last checksum
+question. Key functions (deobfuscated):
+
+**Packet builder** — one function builds every packet:
+
+    Bn = (t, n, r=["00","00"], i=63) => {
+      let o = [t, ...r, (i-7).toString(16), "00","00","00", ...n];  // opcode, off, len, pad, payload
+      const c = yne(o);                                            // additive checksum
+      o[4] = c[0]; o[5] = c[1];                                    // stored little-endian
+      return o;
+    }
+
+**Checksum** `yne` — additive, little-endian (bytes[4,5]): `sum(all bytes as ints) & 0xFFFF`.
+
+**CRC16** `ga` — CRC16-MODBUS (init 0xFFFF, poly 0xA001, big-endian) over `[type,flag,subcmd]`,
+placed at bytes[12,13] of announces.
+
+**Command map** — a literal `{sendScreenControlInformationPackage:"0x40", …DataPacket:"0x41",
+finish…:"0x42", getDongleAndKeyboardStatus:"0x55", getFirmwareVersion:"0xB0", toBootLoader:"0xB1",
+getBootLoaderStatus:"0xB2", confirmFirmwareInfo:"0xB3", startUpgrade:"0xB4", transferUpgradeData:"0xB5",
+upgradeComplete:"0xB6", endUpgrade:"0xB7", …}` — dispatched by `Dr(cmd,…)→Bn`. This is the
+authoritative source for the `0xB1–0xB7` DFU names in §13.
+
+**View / command handlers** (the Equipment-setup menu `h[]`, Chinese labels → handler → type):
+
+| Menu label | Handler | Sends |
+|-----------|---------|-------|
+| 切换到主页 Switch to homepage | `i` | announce type **11** |
+| 切换到图片页 Switch to picture page | `o` | announce type **13** |
+| 切换到GIF页 Switch to GIF page | `c` | announce type **15** |
+| 更新设备时间 Update device time | `f` | see §5b/§5c |
+| 清除图片 Clear picture | `d` | announce type **14**, sent **16×** (the 16 image slots) |
+| 清除GIF Clear GIF | `u` | announce type **18** subcmd 1 → type **19** subcmd 2 |
+
+**Time/date handler `f`** (source):
+
+    D=[165,90,9,0,3,195,225]   // time announce: A5 5A, type 9, 0, subcmd 3, crc C3E1
+    T=[165,90,10,0,4,1,80]     // date announce: A5 5A, type 10, 0, subcmd 4, crc 0150
+    P=[hour,minute,second]                    // time data payload
+    M=[YY, dayOfWeek(1-7), month, dayOfMonth] // date data payload
+    for(3×): announce(D)→data(P)→finish, announce(T)→data(M)→finish
+
+So the whole "update time" is **repeated 3×**, and the date payload order is `[year, weekday,
+month, day]` — see §5c.
 
 ### 5b. Time data packet (0x41, subcommand 0x03)
     41 00 00 03 [CKSUM] 00 00 HH MM SS   (rest zero-padded to 64)
@@ -221,11 +277,15 @@ there is **one checksum rule for all 0x41 data packets.**
 - byte[8] = MM (minute)
 - byte[9] = SS (second)
 
-### 5c. Date data packet (0x41, subcommand 0x04)
-    41 00 00 04 6A 00 00 [DD] [MM] [YY] 01
+### 5c. Date data packet (0x41, subcommand 0x04) — DECODED from source
 
-Observed sample: `1a 03 07 01` → day/month/year-ish + byte[10]=0x01. Date appeared
-STATIC across syncs (stored in firmware); not the focus of this project. Not fully decoded.
+    41 00 00 04 [CKSUM] 00 00 [YY] [DOW] [MM] [DD]
+
+Payload order is **`[year(2-digit), dayOfWeek(1–7), month, dayOfMonth]`** (from the site's `f`
+handler, §5f: `M=[YY, day()||7, month()+1, date()]`). The old sample `1a 03 07 01` decodes as
+**year 0x1A=26 (2026), weekday 3, month 7 (July), day 1** — i.e. 2026-07-01, matching when it
+was captured. Earlier we'd guessed `[DD][MM][YY]`; that was wrong. byte[4]=the §5e checksum.
+Sent together with the time packet, 3× (§5f).
 
 ### 5d. Finish packet (0x42)
     42 00 00 38 7A   (rest zero-padded to 64)   — constant, commits the operation.
@@ -388,8 +448,9 @@ rev2.1 session (not re-derivable from this repo's captures, which didn't press t
 The announce CRC16-MODBUS (§5e) was generalized and **verified on 5 distinct commands**
 (homepage 0x0200, picture 0x03E0, GIF 0xC341, time-A 0xC3E1, time-B 0x0150).
 
-Not captured (would wipe content): "Clear the picture", "Clear GIF" — expected to be the
-same announce + finish shape.
+**Clear commands — DECODED from source (§5f), never need capturing:**
+- **Clear picture** = announce **type 14** + finish, sent **16 times** (once per image slot).
+- **Clear GIF** = announce **type 18 subcmd 1** + finish, then **type 19 subcmd 2** + finish.
 
 > **type-9 caveat / discrepancy to resolve.** rev2.1 says type 9 / subcmd 3 is a **generic
 > data-write channel**, reused for the time txn AND (it claims) the image/GIF pixel transfer,
@@ -505,29 +566,23 @@ intermittent — `window.__editedJSON` holds the keymap string when the site all
 
 ## 10. Open Questions / Next Steps
 
-_Both the announce CRC16 and the data-packet checksum are CRACKED (§5e), the view-switch
-command table is captured (§7), and GIF frame addressing is decoded (§7). What remains:_
+_After reading the site JS bundle (§5f), almost everything is now source-confirmed. Both
+checksums, the full command map, the date payload, the clear commands, and view-switching are
+all solved. What genuinely remains:_
 
-1. **Announce bytes[4,5]** — a reproducible **per-command constant** (homepage 339, picture
-   566, GIF-page 601, time/image 758) whose generating formula nobody has matched (not a CRC
-   or header sum). Not required to reproduce commands — reuse the captured value — but its
-   origin is unknown. (Also: byte[3] is a constant 0x07 marker, not a length.)
-2. ~~GIF bank-base encoding~~ — **RESOLVED (§7):** there is no bank-base field; addressing is
-   implicit/sequential (device advances 1024 bytes per completed 0→0x3F0 offset cycle). Proven
-   by byte-identical consecutive banks. What's left of the setup packets is just the exact
-   meaning of the frame-boundary `0x09`/`0x0A`/`0x07` bytes (not required to forge frames).
-3. **GIF frame-count field** — the count (3 here) shows as three `0x0A→0x07` setup pairs, but
-   the explicit count byte isn't pinned. Candidates: 0x40 announce param, or the 0x0A setup
-   (`byte[13,14] = 04 30 02`). Confirm by capturing GIFs with different frame counts.
-4. **GIF frame-rate encoding** — the dialog sets it globally; find the byte by capturing
-   uploads at different FPS. (byte[10]=0x78=120 recurs in both still + GIF setup — likely a
-   fixed height/param, not the rate.)
-5. **Time payload bit-mapping** — the two time transactions (type 9/subcmd 3 payload
-   `[0x12,0x2F]`; type 10/subcmd 4 payload `[26,3,7,1]`) → exact H/M/S/date field mapping is
-   still approximate. The working 12h sync produces correct output regardless.
-6. **Clear commands** — "Clear the picture" / "Clear GIF" bytes not captured (avoided, would
-   wipe content). Expected to be announce + finish, same shape.
-7. **Persistence** — does date/time survive power cycle? (The re-sync loop makes this moot.)
+1. ~~Announce bytes[4,5]~~ — **SOLVED (§5e/§5f):** it's the `yne` additive checksum, same rule
+   as data packets. Never a per-command constant. (And byte[3] is a length marker, not a
+   version constant.)
+2. ~~Date payload / time bit-mapping~~ — **SOLVED (§5c):** date = `[YY, dayOfWeek, month, day]`,
+   time = `[H, M, S]`, both sent 3×.
+3. ~~Clear commands~~ — **SOLVED (§5f/§7):** clear-picture = type 14 ×16; clear-GIF = type 18/19.
+4. ~~GIF bank-base encoding~~ — **RESOLVED (§7):** implicit/sequential (1024 bytes per completed
+   0→0x3F0 cycle), proven by byte-identical consecutive banks.
+5. **GIF frame-count + frame-rate encoding** — the last real unknowns. The "Frame rate setting"
+   dialog (default 30 FPS) sets it globally; which byte carries FPS, and how the frame count is
+   encoded, isn't pinned yet. Being chased in the bundle's GIF-upload code; failing that,
+   capture GIFs at different frame counts / FPS.
+6. **Persistence** — does date/time survive power cycle? (The re-sync loop makes this moot.)
 
 ---
 
