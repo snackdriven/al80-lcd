@@ -458,6 +458,22 @@ dialog, default 30 FPS, global per GIF).
   returning long hex/token-like strings. Work around it by emitting only short scalar fields
   or structural booleans.
 
+### Throughput / refresh rate (measured on-device, 2026-07-01)
+
+A full 550-packet frame is **HID-write-bound, not device-bound** — and on Windows the killer is
+`setTimeout` resolution, not the USB link:
+
+| Inter-packet gap | Full frame | fps |
+|------------------|-----------|-----|
+| 5 / 2 / 1 ms | ~8.5 s | 0.12 |
+| **0 ms** | **~0.55 s** | **~1.8** |
+
+Any nonzero sleep costs ~15.6 ms (Windows timer floor), so 550 sleeps ≈ 8.5 s. Send frames with
+**no inter-packet sleep** (or `setImmediate` / a sub-ms busy-wait) for ~2 fps full frames; ~1 ms
+per packet is the real throughput. A small partial region (e.g. a clock's seconds ≈ 10–40 blocks)
+would be ~10–40 ms at gap=0 — *if* partial updates are honored (see `converter/experiments/`,
+outcome still pending an eyes-on check). Raw captures + logs: `converter/experiments/RESULTS.md`.
+
 ---
 
 ## 9. Related Keymap Work (VIA, same keyboard, separate from LCD)
