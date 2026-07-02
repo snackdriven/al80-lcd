@@ -399,6 +399,15 @@ same announce + finish shape.
 > different capture sessions / app states. Measured-here mapping: **0x09=time, 0x10=image,
 > 0x12=GIF**. rev2.1's "generic channel" framing is recorded but unverified against this repo's data.
 
+> **Cross-reference (community, independent confirmation).** @nvoostrom's VIA definition
+> (`keymap/community/AL80_QMK_V0104-FIX-20250424.json`, from the ArgentStonecutter/keyboards
+> repo) exposes these three view switches as **named custom keycodes**: `HOM` (homepage/clock),
+> `IMG` (image), `GIF`. Yunzii's own definitions ship only `KC_USB`, so this independently
+> confirms homepage/image/GIF are first-class firmware view commands — matching the three
+> captured switch types (11/13/15) above. The same definition names sibling functions we
+> haven't sniffed (backlight `BLT`, brightness `B+`/`B-`, connectivity, reset, OS switch). See
+> `keymap/community/README.md`.
+
 ### Display attributes are CLIENT-SIDE (no device opcode)
 
 Brightness, Chroma, Saturation, Grayscale, "Fuzzy", and Sharpening are **not** device
