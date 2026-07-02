@@ -1,10 +1,10 @@
 ---
 title: YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
 status: active
-updated: 2026-07-01
+updated: 2026-07-02
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
-confirmed: FULLY DECODED — protocol re-derived from web JS + desktop Qt app (§14). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 112×137 RGB565 BE.
+confirmed: FULLY DECODED — protocol re-derived from web JS + desktop Qt app (§14). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE (corrected 2026-07-02; was mis-stated as 112×137).
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
@@ -12,8 +12,161 @@ confirmed: FULLY DECODED — protocol re-derived from web JS + desktop Qt app (�
 Self-contained reference so this project can be resumed cold by a human or another AI.
 Consolidated from all sessions: the HID protocol reverse-engineered for the YUNZII AL80's
 LCD panel, the 12-hour clock hack, the confirmed image pixel format (RGB565 big-endian) and
-display resolution (112×137), the still-image and GIF packet structure, the tooling built,
+display resolution (**96×160** — corrected 2026-07-02, see the corrected-protocol section
+below; older text says 112×137), the still-image and GIF packet structure, the tooling built,
 the read-only command-sweep result, open questions, and future modification ideas.
+
+> **HEADS UP (2026-07-02):** Several long-standing claims below are now proven WRONG by a live
+> reverse-engineering session (live captures of the vendor app + capstone disassembly of two
+> official firmwares). The panel is **96×160, not 112×137**; still images have a **32-byte tail
+> block**; GIFs need **mandatory send pacing**. Read the corrected section immediately below
+> first — it supersedes the older text, which is kept with inline correction markers.
+
+---
+
+## 2026-07-02 — Corrected & complete LCD protocol (live-capture + disassembly verified)
+
+Every fact in this section is byte-verified against live captures of the vendor app and a
+capstone Thumb-2 disassembly of two official firmware binaries. Where it conflicts with older
+sections, **this section wins.** Older wrong claims are marked inline with `> CORRECTION (2026-07-02)`.
+
+### C1. Panel is 96×160, NOT 112×137
+
+The display is **96 wide × 160 tall = 15,360 px = 30,720 bytes** RGB565 big-endian.
+
+The old "112×137 / 30,688 bytes / 548 blocks" figure was **wrong**. Our first capture-analysis
+script filtered out a final **32-byte data block** (the one with `byte[3] = 0x20`), so the last
+16 pixels were dropped and every still image we built was malformed and never rendered.
+
+Correct still-image data = **548 × 56-byte blocks + 1 × 32-byte tail block**. The 548 blocks
+cover offsets `0 … 30687`; the 32-byte tail sits at offset **30,688 (0x77E0)**; total frame
+length = **30,720 (0x7800)**.
+
+The type-0x0C length setup packet proves it:
+
+    41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93
+
+declares length **0x7800 = 30,720 = 96×160**. The value we used to call "the 0x78 fixed panel
+param (120)" at byte[10] was a **misread** — it's the **high byte of the frame length** (0x78 <<
+8 = 0x7800), with byte[11] = 0x00 the low byte.
+
+### C2. Still image (picture page)
+
+Flat, no banking. Sequence:
+
+    announce  (0x40, type 0x10):  40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01
+    length    (0x41, type 0x0C):  41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93     ; len 0x7800 = 30,720
+    data      (0x41):             548 × 56-byte blocks + 1 × 32-byte tail (byte[3]=0x20)
+                                  global little-endian offsets; tail at 0x77E0, total len 0x7800
+    finish    (0x42):             42 00 00 38 7A
+
+The upload **AUTO-SHOWS** as a full-screen, image-only view. There is **NO separate view-switch
+command** — uploading the image is what switches the view. (This corrects the older idea that a
+standalone type-0x0D "picture-view" switch is required.)
+
+### C3. GIF / animation — one wire format, a MODE byte with three modes
+
+    mode 0 = startup animation   96×160,  cap 64 frames
+    mode 1 = GIF page            96×160,  cap 160 frames
+    mode 2 = main page           96×64 = 12,288 bytes, cap 42 frames (AL80-specific, PID-gated in the app)
+
+Structure (mode carried in the `extra` bytes throughout):
+
+    announce  (0x40, type 0x12, extra [mode, 0])
+    setup     (0x41, type 0x13, extra [mode, 0])
+    per frame:
+      header  (0x41, type 0x10, subcmd 3, extra [0x02, mode, FRAME_INDEX])
+      length  (0x41, type 0x11, [lenHi, lenLo]  ; BIG-ENDIAN frame length)
+      data    (banked — see C5)
+    finish    (0x41, type 0x12, extra [mode, FRAME_COUNT])
+    finish    (0x41, type 0x13, extra [mode, FPS])
+    finish    (0x42)
+
+### C4. Per-frame header = [0x02, mode, FRAME_INDEX]
+
+The **frame index is the 10th payload byte** (the header length byte is `0x0A` = 10) and
+increments 0, 1, 2, …
+
+Dropping it (sending only `[0x02, mode]`) makes every frame index 0, so frames overwrite each
+other and **the GIF renders WHITE**. This was a real bug we hit.
+
+Byte-verified via the checksum: frame N's header checksum = base + N.
+- mode-2 frame 0 header = `… 04 30 02 02 00`, checksum **0x95**
+- mode-2 frame 1 header = `… 04 30 02 02 01`, checksum **0x96**
+
+### C5. Banking — 1024-byte banks, offset resets per bank
+
+Each frame's pixel data is streamed in **1024-byte BANKS**. Each bank = **18 blocks of 56 bytes
++ 1 block of 16 bytes** (18×56 + 16 = 1024).
+
+The packet offset (`bytes[1,2]`, little-endian) **RESETS per bank**: 0, 0x38, 0x70, … 0x3B8,
+then the 16-byte block at **0x3F0**. The device advances banks implicitly (it keeps its own
+destination pointer and bumps it 1024 bytes each completed bank).
+
+- mode 2 (12,288 B) = **12 banks/frame** (228 blocks)
+- modes 0/1 (30,720 B) = **30 banks/frame** (570 blocks)
+
+Control packets are byte-identical between our builder and the vendor's.
+
+### C6. FPS and FRAME COUNT
+
+- **FPS** = the trailing byte of the type-0x13 finish packet.
+- **FRAME COUNT** = the trailing byte of the type-0x12 finish packet.
+
+### C7. Send pacing is MANDATORY for GIFs (this was the killer bug)
+
+The device needs time to commit each bank. Sent back-to-back, banks overwrite each other and
+the GIF renders as **garbage BARS** — even the vendor's OWN exact captured bytes fail if you
+blast them at full speed.
+
+The vendor's `Ur` send routine (decoded from the web bundle) paces like this:
+
+- **30 ms** after the initial setup.
+- **Per frame:** send the header, then `sleep(frameIndex % 16 === 0 ? 3000 : 30)` — i.e. a
+  **3-second pause** after frame 0 and every 16th frame, else 30 ms; then send the length; then
+  send the frame data in 1024-byte banks with **30 ms after EACH bank**.
+- **30 ms** after each finish setup.
+
+**Still images need no pacing** (they're flat, no banks).
+
+Confirmed on-device: with this pacing, a 3-frame GIF animates on the main page with the clock
+intact.
+
+### C8. Pixel format — RGB565 BIG-ENDIAN (confirmed)
+
+    value = ((R>>3)<<11) | ((G>>2)<<5) | (B>>3)
+    emitted as [ value>>8, value & 0xFF ]
+
+(Vendor source: `[pt>>8 & 255, pt & 255]`.)
+
+### C9. Firmware (capstone Thumb-2 disassembly of two official bins)
+
+- The user's **"ripple" firmware = YUNZII official v1.21** (USB bcdDevice **0x0121**), **66,780
+  bytes**. Compared against **V0119** ("10-min sleep", bcdDevice **0x0119**), **58,956 bytes**.
+  Ripple is the **NEWER** build, not a stripped one. VID **0x28E9** / PID **0x30AF**; HID
+  descriptors identical.
+- The LCD command dispatch is **BYTE-IDENTICAL** between the two firmwares (just relocated). The
+  announce-type dispatch is a `cmp` ladder for **9/10/11** (time / date / homepage) plus a **TBB
+  jump table** (ripple @flash **0x08005f2e**, V0119 @**0x08004852**) covering types **0..16**:
+  types **9–15** route to a shared handler that writes the `0x55` ACK and calls a subroutine;
+  **type 16** (image) has its own handler. The picture/GIF pages render via the upload-TYPE
+  handlers, **not** via standalone 0x0D / 0x0F view-switch commands.
+- **Sleep timeout** is a tunable little-endian **u32 milliseconds**: ripple = **240000 (4 min)**
+  at flash **0x08005838**; V0119 = **600000 (10 min)** at **0x08004158**.
+
+### C10. Clock background color — there is NO HID command for it
+
+The clock homepage is **firmware-drawn with a fixed background**; the app only sets the time
+value. Every "color / theme / background / dynamic color" option in the vendor app targets the
+**RGB BACKLIGHT** (per-key lighting) — a different opcode family, out of scope for the LCD.
+
+### Related research (2026-07-02 session)
+
+- `research/vendor-feature-parity.md` — full vendor feature + payload inventory.
+- `research/al80-feature-map.md` — manual → RGB / keymap modification map.
+- `firmware/YUNZII_AL80_V0119_10MIN_SLEEP.bin` — the comparison firmware (bcdDevice 0x0119, 10-min sleep).
+
+---
 
 ## Quick Reference (all key constants)
 
@@ -23,9 +176,9 @@ the read-only command-sweep result, open questions, and future modification idea
 | Vendor ID / Product ID | 0x28E9 / 0x30AF |
 | LCD HID interface | usagePage 0xFF60, usage 0x61 (raw / VIA) |
 | Report ID / report size | 0 (unnumbered) / 64 data bytes |
-| Display resolution | 112 × 137 px, portrait |
+| Display resolution | **96 × 160 px, portrait** (corrected 2026-07-02; was mis-stated 112×137) |
 | Pixel format | RGB565, **big-endian**, 2 bytes/px, row-major, top-left origin |
-| Full frame size | 30,688 bytes = 548 data blocks of 56 bytes (still image: all 56; no tail) |
+| Full frame size | **30,720 bytes** = 96×160×2 = 548 × 56-byte blocks **+ 1 × 32-byte tail** (byte[3]=0x20, at offset 0x77E0); total len 0x7800 |
 | Screen-op sequence | 0x40 announce → 0x41 data → 0x42 finish |
 | Announce type byte[9] | 0x09 = time, 0x10 = image, 0x12 = GIF |
 | Announce CRC bytes[12,13] | CRC16-MODBUS of bytes[9..11], stored big-endian |
@@ -92,17 +245,29 @@ only one process can hold it at a time. Full VIA command set + coexistence notes
 
 ## 3. Display Specs (CONFIRMED)
 
-- **Resolution: 112 × 137 pixels, PORTRAIT.**
+> **CORRECTION (2026-07-02):** the resolution below is WRONG. The panel is **96 × 160 = 15,360
+> px = 30,720 bytes**, proven by the type-0x0C length setup (`… 5A 0C 78 00 …` = 0x7800 =
+> 30,720) and disassembly. The old 112×137 / 30,688 figure came from a capture script that
+> silently dropped a final 32-byte block, so we were 16 px short. See section C1 up top. The
+> pixel format, endianness, and layout below are still correct.
+
+- **Resolution: ~~112 × 137~~ → 96 × 160 pixels, PORTRAIT.**
 - **Color: RGB565 (16-bit), BIG-ENDIAN, 2 bytes per pixel.**
 - **Layout: row-major, top-left origin.**
-- Native pixel count = 112 × 137 = 15,344 px = **30,688 bytes** per full frame.
+- Native pixel count = 96 × 160 = 15,360 px = **30,720 bytes** per full frame.
 
-### How resolution was derived (two independent methods, both agree)
+### How resolution was derived (SUPERSEDED — kept for history)
+> The two "independent methods" below both agreed on 112×137 and were both wrong: they were
+> derived from the same truncated capture (missing the 32-byte tail). The authoritative source
+> is now the firmware length field `0x7800` and disassembly (section C1). Do not trust the math
+> below.
+
 1. **Byte count:** uploaded a known 135×240 test pattern; captured transfer = 30,688 bytes
-   = 15,344 px. The only plausible portrait factor pair of 15,344 is 112 × 137.
+   = 15,344 px. The only plausible portrait factor pair of 15,344 is 112 × 137. *(Wrong: the
+   capture was missing 32 bytes; true transfer = 30,720.)*
 2. **Color-boundary rows:** in the reassembled stream, red→green transition at row 46.3
    and green→blue at row 91.8 — matching the 1/3 (45.7) and 2/3 (91.3) marks of a
-   137-row image. Confirms width = 112, height = 137.
+   137-row image. Confirms width = 112, height = 137. *(Wrong, same truncated data.)*
 
 Artifacts for this in `research/image_capture/` (`al80_testpattern_135x240.png`,
 `testpattern_capture_raw.json`).
@@ -116,8 +281,9 @@ Artifacts for this in `research/image_capture/` (`al80_testpattern_135x240.png`,
 | White | 0xFFFF | FF FF |
 | Black | 0x0000 | 00 00 |
 
-NOTE: the web app **resamples** any uploaded image down to native 112×137 before sending.
-For pixel-perfect custom graphics, render your content directly at 112×137.
+NOTE: the web app **resamples** any uploaded image down to native **96×160** before sending.
+For pixel-perfect custom graphics, render your content directly at **96×160**. (Older text said
+112×137 — corrected 2026-07-02, see C1.)
 
 ---
 
@@ -331,20 +497,26 @@ does NOT force 24hr internally, nor convert. So:
 Sequence: **0x40 announce → many 0x41 data blocks → 0x42 finish.**
 
     Announce (image): 40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01   (type[9]=0x10, CRC C5B1)
-    Setup:            41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93       (byte[10]=0x78)
+    Setup:            41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93       (type 0x0C; 0x7800=30,720 length)
     Data block:       41 [off:2 LE] 38 [accum:2 LE] 00 <56-byte payload>
+
+> **CORRECTION (2026-07-02):** byte[10]=0x78 in the Setup packet is **NOT a panel param** — it's
+> the **high byte of the frame length** (`0x78 00` = 0x7800 = 30,720 = 96×160). See C1.
 
 - byte[1,2]   = **LITTLE-ENDIAN destination byte-offset** into the frame buffer; steps by
                 56 each block (0, 56, 112, 168, 224, 280 …).
-- byte[3]     = payload length. For a **still image, every block is 0x38 (56)** — 548 × 56 =
-                30,688 exactly, so there is **no** short tail block. (The 0x10 = 16-byte block
-                only appears in GIF bank tails; see the GIF section below.)
+- byte[3]     = payload length. **CORRECTION (2026-07-02):** a still image is **548 × 0x38 (56)
+                blocks + 1 × 0x20 (32) tail block** = 30,688 + 32 = **30,720** bytes (96×160). The
+                old "every block is 56, no tail" claim was WRONG — our capture script dropped the
+                final 32-byte block, losing the last 16 pixels (see C1). (A separate 0x10 = 16-byte
+                block length appears in GIF bank tails; see the GIF section below.)
 - byte[4,5]   = **16-bit LE additive checksum** = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF`
                 (see §5e — verified 4288/4288 blocks; NOT the old "seed 121" accumulator).
 - byte[6]     = 0x00 reserved.
 - byte[7..62] = 56 bytes of payload = raw **RGB565 big-endian** pixels, row-major from
                 top-left (see §3, Display Specs).
-- One full frame = **548 data blocks** for 112×137.
+- One full frame = **548 × 56-byte blocks + 1 × 32-byte tail** for **96×160** (30,720 bytes).
+                (Old text said 548 blocks for 112×137 — corrected 2026-07-02, see C1.)
 
 The 0x40 announce here follows the same fully-framed header as §5a (type[9]=0x10 = still
 image; its CRC16-MODBUS over `[0x10,0,0x01]` = 0xC5B1, matching bytes[12,13]).
@@ -360,14 +532,25 @@ little-endian). These first few lines are only the start of the stream, not the 
     ...                       (+0x38 each)
 
 **Measured from the full capture** (`research/image_capture/testpattern_capture_raw.json`):
-a complete still frame runs from offset 0x0000 to **0x77A8** (30,632 = block 547), i.e. the
-full **548 blocks** for a 112×137 frame, then a 0x42 finish. (The capture holds 1,096 data
-records = 548 blocks each sent twice.) So the still-image address space is fully confirmed.
+a complete still frame ends with the 32-byte tail block at offset **0x77E0 (30,688)**, i.e.
+**548 × 56-byte blocks + 1 × 32-byte tail = 30,720 bytes** for a **96×160** frame, then a 0x42
+finish.
+> **CORRECTION (2026-07-02):** the earlier reading of this same capture stopped at the last
+> 56-byte block (offset 0x77A8 = 30,632) and called it "548 blocks, 112×137, 30,632/30,688
+> bytes." That was the bug — the analysis script filtered out the final `byte[3]=0x20` (32-byte)
+> block at 0x77E0, dropping the last 16 pixels. Correct total length is 30,720 (0x7800). See C1.
 
 Interpretation: **0x41 is a generic block-write** — the LCD is effectively a dumb
 framebuffer we can push arbitrary pixels to.
 
 ### GIF / animation protocol (CONFIRMED structure)
+
+> **CORRECTION (2026-07-02):** the authoritative GIF spec is now sections **C3–C7** up top. Key
+> fixes to the text below: (1) frames are **96×160 = 30,720 bytes** (or **96×64 = 12,288** in
+> mode 2), not 112×137/30,688; (2) there's a **MODE byte** (0/1/2) threaded through every
+> packet; (3) the per-frame header carries a **FRAME_INDEX** (10th byte) that increments — drop
+> it and the GIF renders WHITE; (4) **send pacing is mandatory** (30 ms/bank, 3 s every 16th
+> frame) or the GIF renders as garbage bars. The banking description below is correct.
 
 Test input: a hand-built animated GIF89a, 112×137, 3 solid looping frames (red/green/blue).
 The site parsed it correctly (thumbnail column showed all 3 frames). Artifacts in
@@ -398,19 +581,23 @@ at save time: the app shows **"保存帧 N/3"** ("Saving frame N/3") with a 0/50
 bar — one full announce→data→finish transaction per frame.
 
 **GIF frame addressing — RESOLVED (decoded offline from the raw capture).** GIF frames *are*
-full 112×137 RGB565 frames (~30,688 bytes each), but they are **not** streamed in the still
-image's single continuous `0x0000→0x77A8` offset space. Instead the pixel data is sent in
-**banked ~1 KB windows**: byte[1,2] offset runs `0x0000 → 0x03F0` (≈19 blocks) then **resets
-to 0** for the next bank. Analysis of `research/gif_capture/testgif_capture_raw.json`:
+full-panel RGB565 frames (**96×160 = 30,720 bytes**, or 96×64 = 12,288 in mode 2 — corrected
+2026-07-02, was 112×137/30,688), but they are **not** streamed in the still image's single
+continuous flat offset space. Instead the pixel data is sent in **banked 1 KB windows**:
+byte[1,2] offset runs `0x0000 → 0x03F0` (19 blocks) then **resets to 0** for the next bank.
+Analysis of `research/gif_capture/testgif_capture_raw.json`:
 
-- 3 frames, delimited by the `0x0A → 0x07` setup pair (six of each = 3 frames × 2 setup roles).
-- Per frame: **~28–31 banks** of ~1 KB each → ~30,688 bytes, i.e. one full frame. (Measured
-  runs per frame: 31, 30, 25; the spread is duplicate sends + partial trailing banks.)
+- 3 frames, delimited by the setup pair (six of each = 3 frames × 2 setup roles). See C3 for the
+  authoritative packet types (0x13/0x10/0x11 with the MODE byte); the `0x0A/0x07` naming here is
+  the older capture's subcmd view.
+- Per frame: **30 banks/frame** for 96×160 (or 12 for mode 2) → one full frame. (Measured runs
+  per frame in this capture: 31, 30, 25; the spread is duplicate sends + partial trailing banks.)
 - 86 data runs total, each capped at offset 0x03F0 — this is why a naive max-offset read
-  showed 0x03F0 and looked like it contradicted "30,688 bytes/frame." It doesn't: the bank
-  base is carried by the setup packets, not by byte[1,2].
+  showed 0x03F0 and looked like it contradicted a full-frame byte count. It doesn't: the device
+  advances the bank base implicitly (see C5), it's not carried in byte[1,2].
 
-So the still image uses one flat offset space to 0x77A8; the GIF uses banked 1 KB windows
+So the still image uses one flat offset space (ending with the 32-byte tail at 0x77E0, total
+0x7800); the GIF uses banked 1 KB windows
 with the same 56-byte block form inside each bank. Each **1 KB bank = 18 × 56 + one 16-byte
 (0x10) tail block** (1008 + 16 = 1024) — this is the only place the 0x10 block length appears
 (the still image has none). Measured: the GIF capture's blocks are 3,024 × 56-byte + 168 ×
@@ -600,7 +787,7 @@ captures, the web JS bundle, and the desktop Qt app.
 
 - **Clock modes:** countdown/pomodoro timer, second timezone, "run fast" clock.
 - **Smart sync:** align to minute boundary; back off when idle / on battery.
-- **LIVE INFO PANEL** (now fully feasible — format + resolution known): render 112×137
+- **LIVE INFO PANEL** (now fully feasible — format + resolution known): render **96×160**
   RGB565 frames of CPU/GPU temp+load, now-playing, unread mail, crypto/stock ticker,
   weather, next calendar event.
 - **View automation:** auto-switch LCD to a GIF on game launch / clock otherwise;
@@ -617,25 +804,27 @@ With both checksums cracked (§5e), a full still-image transfer can now be forge
 Any client-side look (brightness, grayscale, etc.) must be baked into the pixels first — there
 is no device opcode for it (see §7, Display attributes are client-side).
 
-1. Draw your content on a **112×137** canvas. Apply any brightness/grayscale/etc. here.
+1. Draw your content on a **96×160** canvas. Apply any brightness/grayscale/etc. here. (Corrected
+   2026-07-02 from 112×137, see C1.)
 2. Convert each pixel to **RGB565 big-endian**:
    `v = ((R>>3)<<11) | ((G>>2)<<5) | (B>>3);  bytes = [v>>8, v & 0xFF]`
-3. Concatenate row-major → **30,688-byte** buffer (548 blocks × 56 bytes).
+3. Concatenate row-major → **30,720-byte** buffer (548 × 56-byte blocks + 1 × 32-byte tail).
 4. **Announce (0x40):** `40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01` — type[9]=0x10 (image);
    the CRC bytes[12,13]=`C5 B1` are CRC16-MODBUS over `[0x10,0x00,0x01]`. (Reuse the captured
    still-image announce until the size field byte[3,4,5] is decoded — §10, item 1.)
-5. **Data blocks (0x41):** 548 blocks, `k = 0…547`, **all 56 bytes** (548 × 56 = 30,688 exact,
-   no short tail — the 0x10 tail is GIF-only):
-   - offset = k × 56, little-endian in bytes[1,2]
-   - byte[3] = 0x38 (56)
-   - byte[6] = 0x00, then the 56 payload bytes
+5. **Data blocks (0x41):** **548 blocks of 56 bytes + 1 final 32-byte tail block** (548 × 56 +
+   32 = 30,720; the tail has byte[3] = 0x20 — corrected 2026-07-02, do NOT drop it, see C1):
+   - offset = running byte offset, little-endian in bytes[1,2] (0, 56, 112, … 30,688)
+   - byte[3] = 0x38 (56) for the 548 blocks; **0x20 (32) for the final tail block**
+   - byte[6] = 0x00, then the payload bytes (56, or 32 for the tail)
    - checksum (bytes[4,5], 16-bit LE) = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF`
      — compute it **after** laying down the payload (see §5e)
 6. **Finish (0x42):** `42 00 00 38 7A` (rest zero-padded).
 7. Remember `pad()`: OS-level HID libs prepend a 0x00 report-ID byte, then zero-fill to 64.
 
-**Still unverified for forging:** the announce size field byte[3,4,5] (§10, item 1) — the
-captured announce is known-good, so reuse it verbatim for 112×137 until that field is decoded.
+**Length is now decoded (2026-07-02):** send the type-0x0C setup packet
+`41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93` after the announce — byte[10,11] = `78 00` = 0x7800
+= 30,720 = 96×160 (see C1/C2). No longer a mystery field.
 
 ---
 
