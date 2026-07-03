@@ -24,6 +24,47 @@ the read-only command-sweep result, open questions, and future modification idea
 
 ---
 
+## 2026-07-02 (overnight) — picture-page banding root cause + loose ends closed
+
+Full write-up: `research/2026-07-02-picture-page-banding-investigation.md`.
+
+**Picture-page solid-color banding.** Uploading a solid color to the picture page renders as
+alternating red/blue horizontal bands. Root cause (high confidence): the LCD is a **separate
+smart display module** (the STM32F103 keyboard MCU does NOT drive the panel — no A5 5A parser,
+no ST7789 CASET/RASET/RAMWR/init in either firmware bin; it forwards our stream over SPI2/USART3).
+The module's picture-page scanout applies a **per-scanline 1-byte parity slip** (byte-swaps
+alternate rows: `F8 00`→`00 F8` = blue; white `FF FF` is swap-invariant → stays uniform). Proven
+that everything host-side is correct: block size **56** (reqLen = table 64 − 1 = 63, so payload
+= 63−7 = 56), geometry **96×160 row-major** (confirmed by reassembling the vendor's 135×240 test
+pattern from the capture: ~160 runs of ~90 px = letterboxed 90-wide image in 96-wide rows),
+transport perfect (a 549-block solid-red transfer echoed back **549/549 byte-exact**, device
+stamps `byte6 = 0x55` as ACK; the "duplicate blocks" in the raw capture were OUT + IN-echo, not a
+resend). Math proof it's not a width bug: solid red is `F8 00` period-2, so any *even* pixel stride
+starts every row on `F8` → uniform; only an odd-byte parity slip can band a solid color.
+
+**The fix (to confirm on-device):** pre-swap the two RGB565 bytes on alternate scanlines. Test
+harness deployed at **`al80-studio/lab.html`** (green probe → swap-odd → swap-even → vendor-exact
+→ stride-pad → real photo). One of swap-odd / swap-even should render uniform red.
+
+**Same-family reference:** AttackShark K86 / X85 Pro (VID 0x3151) — documented protocols on
+GitHub (`EricOFreitas/attackshark-x85pro-linux`, `Xynthera/AttackShark_K86_Spotify`). Same silicon:
+RGB565 BE, 56-byte chunks, Report ID 0, 64-byte reports, **column-major** packing (our AL80 vendor
+data is row-major — resolve orientation on real photos), oversized framebuffer with off-screen rows.
+
+**Loose ends closed:**
+- **GIF frame count / rate** (last open item): frame count = last byte of the FINAL type-0x12;
+  frame rate = last byte of the FINAL type-0x13 (UI slider 1–60, default 30). `buildModeGif`
+  already emits these correctly — nothing to change.
+- **GIF inter-frame white flash** is a firmware trait of this whole panel family (AttackShark has
+  it too, unfixed) — not a bug in our upload.
+- **No clock-background-color or LCD-brightness command exists.** Inner protocol is exactly types
+  0x09–0x13. Brightness/hue/saturation are client-side canvas filters; sleep/backlight are
+  keyboard-power settings on the outer `setDeviceMessage 0x13` channel. No battery query exists.
+- **WebHID length:** Chromium rejects wrong-length reports (doesn't truncate); vendor sends
+  **63-byte** reports (we send 64; Windows pads/truncates the harmless pad byte).
+
+---
+
 ## 2026-07-02 — Corrected & complete LCD protocol (live-capture + disassembly verified)
 
 Every fact in this section is byte-verified against live captures of the vendor app and a
