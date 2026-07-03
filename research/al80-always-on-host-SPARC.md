@@ -200,6 +200,58 @@ the app degrades gracefully.
 
 ---
 
+## Caveats, unknowns & workarounds (pre-mortem)
+
+Three de-riskers that change the risk profile:
+- **The echo channel is a self-test.** The device ACKs every report (`byte6=0x55`), so we can
+  auto-detect the correct report length (send 63 vs 64, see which echoes) and use echoes as a
+  **health watchdog** — if they stop, back off before the device wedges.
+- **Mock transport (frames→PNG)** quarantines the hardware unknowns: ~90% of the code (apps, diff,
+  render) is built and tested with no device. (Done — see `al80-studio/host/`.)
+- **Browser-kiosk is a full fallback.** If node-hid fights us, "always-on" can be an auto-started
+  minimized Chrome tab running the existing app — reuses 100% of browser code, zero new transport.
+
+Load-bearing unknowns, ranked, each with a workaround:
+1. **Can node-hid open + write `0xFF60/0x61` on Windows?** Foundational. *Mitigation:* the M0 spike
+   tests it in ~30 min, verified by the ACK echo. Fallback: browser-kiosk. (Decision gate.)
+2. **Can a wedged device recover without a physical replug?** Genuine unknown (we always replugged).
+   *Mitigation:* wedge-*avoidance* via the echo watchdog (never outrun ACKs); test `close()`+`open()`
+   soft-reset in M0; worst case the daemon shows a static frame + asks for a replug instead of
+   hammering a locked device.
+3. **Knob/key nav needs input access = keylogger-adjacent** (the knob rides the keyboard HID
+   interface the OS owns). *Correction:* drop from v1. Interactive modes run in the browser (keydown
+   for free); the daemon is driven by the control API + schedule. Knob-nav is an opt-in M4 feature
+   with the privacy caveat stated.
+4. **The banding fix might not hold.** *Mitigation:* ambient content can target the **main page
+   (96×64, renders solids correctly)** instead of the picture page; or use textured/dithered
+   backgrounds so the artifact hides; make the swap parity a config value, not code.
+5. **Single-opener coordination > one line.** *Phase it:* v1 uses a **lease** — al80-studio pings
+   `localhost:7333` on Connect, the daemon releases + backs off, then auto-reacquires when it polls
+   the device free (~10-line browser shim, not a rewrite). Third-party apps (VIA, yunzii-game.com)
+   won't honor a lease → tray needs a manual "pause."
+6. **Now-playing / webhooks need bridges.** Media via a shelled PowerShell/WinRT call or the Spotify
+   Web API; external webhooks via the **seedbox as an outbound relay** (daemon holds an outbound WS
+   to the seedbox) — which also gives phone→seedbox→keyboard remote control and is the two-person
+   pager's exact shape.
+
+Smaller: fonts can fail headless → **hand-rolled bitmap font** for MVP (done, zero canvas dep);
+WebHID grants may not survive a replug (hurts kiosk, not node-hid — point for native); laptop
+battery → adaptive fps; **reconnect must always push a full frame** (region diffs assume the panel
+matches the last frame — stale after any gap).
+
+**Revised recommendation:** don't pre-commit the architecture — let the M0 spike decide. node-hid
+opens+writes cleanly in 30 min → go native. It fights → ship the browser-kiosk clock first. Either
+way, the mock + apps (built now) mean app development never waits on hardware.
+
+## Progress (2026-07-02)
+- **M1 app layer started, device-free & validated:** `al80-studio/host/` — mock transport that
+  reassembles real packets into a framebuffer (validates the builders), a 5×7 **bitmap-font clock**,
+  a **region diff** (a one-second tick = 60 blocks vs 549 full, ~9× cheaper), zero-dep PNG preview.
+  `node host/demo.js` renders + validates a clock sequence; `host/test/roundtrip.test.mjs` passes.
+- Added `buildImageRegion(frame, start, end)` to `protocol.js` (the real-time partial-update path;
+  17 protocol tests still green).
+- **Pending:** the M0 node-hid spike (native transport) — the one thing that still needs the device.
+
 ## C — Completion
 
 ### Milestones
