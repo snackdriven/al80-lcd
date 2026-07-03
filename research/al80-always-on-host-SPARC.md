@@ -250,7 +250,15 @@ way, the mock + apps (built now) mean app development never waits on hardware.
   `node host/demo.js` renders + validates a clock sequence; `host/test/roundtrip.test.mjs` passes.
 - Added `buildImageRegion(frame, start, end)` to `protocol.js` (the real-time partial-update path;
   17 protocol tests still green).
-- **Pending:** the M0 node-hid spike (native transport) — the one thing that still needs the device.
+- **M0 DONE — GO NATIVE.** `host/spike.mjs` + `host/transport-hid.js`: node-hid installs from a
+  prebuilt binary (2s, no build tools), **opens** the `0xFF60/0x61` interface on Windows, writes a
+  clock (64-byte body, reportId 0 prepended), and gets **18/18 ACK echoes** (`byte6=0x55`) — the
+  same echo channel we verified over WebHID, now a health/wedge watchdog in `HidTransport`. The LCD
+  showed a Node-pushed clock with no browser involved. The browser-kiosk fallback is not needed.
+- **Interface map** (from node-hid enumeration): MI_01 = `0xFF60/0x61` (LCD), MI_02/Col03 =
+  `0x0C/0x01` consumer-control (**the knob likely reports here**), MI_03 = `0xFF31/0x74` (VIA/raw).
+- **Next:** M1 daemon loop (HidTransport + clock app + region diff + reconnect FSM + Task Scheduler
+  autostart) — all its pieces now exist and are validated; it's assembly, not unknowns.
 
 ## C — Completion
 
