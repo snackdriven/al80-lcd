@@ -203,12 +203,77 @@ A hand-rolled WS relay is the fallback if self-hosting ntfy is a problem.
 
 ---
 
+# Feature C — "Claude needs you" notifier
+
+A special case of Feature B: Claude Code itself is a **local alert source**. When Claude needs
+attention (a permission prompt, waiting for input) or finishes a long task, the keyboard shows it —
+so you stop babysitting the terminal. Almost entirely reuse; the new bits are a hook script + a
+tiny bit of render polish.
+
+## S — Specification
+**Functional:** FR1 a Claude Code **Notification** hook POSTs an alert to the daemon (local
+`127.0.0.1` if same machine, ntfy if Claude runs elsewhere); FR2 the card shows the ask + the
+**project** (cwd basename) — e.g. "needs permission: Bash · al80-studio"; needs-you = sticky,
+done = transient; FR3 **ack on the LCD clears the LCD** (it does NOT answer Claude — the terminal
+still owns the actual response); FR4 **noise control** — Notification by default; the **Stop** hook
+only for long/background turns (gated by duration or a marker), debounced; FR5 (rich) multi-session:
+key by `session_id`, show "N waiting" when several sessions want you.
+
+**Non-functional:** the hook is **fast + non-blocking** (short-timeout fire-and-forget); if the
+daemon is down the POST fails silently and the hook exits 0 — **never block or break Claude**.
+**Non-goals:** answering Claude from the LCD; reading transcripts. **Constraints:** verify the exact
+Claude Code hook payload schema; cross-machine goes through the ntfy relay.
+
+## P — Pseudocode
+```
+# ~/.claude/hooks/al80-notify.mjs  (registered in ~/.claude/settings.json under hooks.Notification)
+in = JSON.parse(stdin)                       # { message, cwd, session_id, transcript_path }
+alert = { source:'claude:'+in.session_id, level:'warn', sticky:true,
+          title:'Claude needs you', body: basename(in.cwd)+' · '+in.message }
+POST alert -> http://127.0.0.1:7333/alert    # 300ms timeout; on any error -> exit 0 (silent)
+# optional hooks.Stop (filtered): if turn was long/background -> {title:'Claude done', level:'ok', sticky:false}
+```
+
+## A — Architecture
+Reuses Feature B's **alert app + local-hook + relay** wholesale. New: the hook script + its
+`settings.json` registration. Same-machine → localhost; Claude-on-another-box → publish to the ntfy
+topic (the daemon subscribes either way). **Dedup by `session_id`** — replace a session's pending
+card rather than stacking, so a session shows one live status.
+
+## R — Refinement
+- **Payload schema:** confirm the current Notification/Stop hook fields (the `message` text is the
+  load-bearing one); user already runs Claude hooks, so the mechanism is known.
+- **Noise:** Notification-only by default; Stop gated behind a duration/background marker; debounce
+  identical messages.
+- **Multi-session mission-control:** key alerts by `session_id`; a summary card ("2 sessions waiting")
+  when several are pending; the existing **session-coordinator** agent could feed a richer board.
+- **Cross-machine:** same alert model; route via ntfy when the keyboard is on a different box than
+  Claude (Mac vs the Windows box).
+- **Ack semantics:** make it explicit on-card — dismissing clears the *LCD*, the terminal still needs
+  your real answer.
+- **Safety:** short timeout + `exit 0` on failure so a stopped daemon never delays Claude.
+- **Testing:** pipe a sample hook JSON into the script → assert the POST body → render via the mock
+  transport → PNG. No live Claude turn needed.
+
+## C — Completion
+- **CN1** hook script + registration + local POST → a sticky "Claude needs you · project" card,
+  ack-to-clear. (Smallest possible end-to-end alert — validates the whole stack.)
+- **CN2** Stop-for-long-tasks (transient "done") + debounce.
+- **CN3** multi-session count/board; cross-machine via ntfy.
+- **Accept:** run a command that needs permission → within a second the keyboard shows "Claude needs
+  you · al80-studio"; a key clears it. **First step:** confirm the Notification hook payload; drop in
+  the script.
+
+---
+
 ## Sequencing + combined caveats
 
-**Build webhooks first.** It reaches a real, useful result fastest: no OAuth, **no banding gate**
-(text alerts render clean on the main page today), and the infra exists (seedbox + Uptime Kuma). Now-
-playing needs OAuth + the byte-swap fix + an image decoder, so it's second (and its N1 text-only
-variant can land in parallel).
+**Order: foundation → Claude notifier → Uptime Kuma → the rest → now-playing.**
+The **Claude-needs-you notifier (CN1)** is the smallest possible end-to-end slice — a local POST to
+the daemon, no seedbox, no OAuth, no banding gate (text on the main page) — so it's the ideal way to
+prove the whole alert stack works. Then **Uptime Kuma → ntfy** adds the first *external* alert with
+near-zero glue (infra already running). **Now-playing** is last: it needs OAuth + the byte-swap fix +
+an image decoder, though its N1 text-only variant can land in parallel.
 
 **Shared gates/unknowns:**
 - **Banding fix** — gates album art + colored alerts on the picture page; both have clean main-page
