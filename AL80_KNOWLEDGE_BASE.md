@@ -4,7 +4,7 @@ status: active
 updated: 2026-07-04
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID + PK_* display protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, picture DISPLAY/commit, VIA keymap, custom-QMK + hardware RE
-confirmed: FULLY DECODED — HID upload protocol re-derived from web JS + desktop Qt app (§14) AND the display module's PK_* commit protocol RE'd from RIPPLE.bin + b75Pro sibling source (§D, 2026-07-04). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE ROW-MAJOR. Picture DISPLAY solved (PK_ADD_PIC commit + two settles, NO trailing view switch). Banding = dropped bytes, fix = ACK-gating (parity-slip + column-major theories retired). now-playing LIVE on-device. Wireless/battery/side-bar RE done; custom QMK compiles (LCD-on-custom still blocked by B7).
+confirmed: FULLY DECODED — HID upload protocol re-derived from web JS + desktop Qt app (§14) AND the display module's PK_* commit protocol RE'd from RIPPLE.bin + b75Pro sibling source (§D, 2026-07-04). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE ROW-MAJOR. Picture DISPLAY solved (PK_ADD_PIC commit + two settles, NO trailing view switch). Banding = dropped bytes, fix = ACK-gating (parity-slip + column-major theories retired). now-playing LIVE on-device. Wireless/battery/side-bar RE done; custom QMK compiles (LCD-on-custom now PORTABLE FROM SOURCE — screen enable is C9 not B7, no logic analyzer; see research/custom-qmk-lcd-port-plan.md).
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
@@ -23,6 +23,9 @@ and future modification ideas.
 > theories**: the panel is **ROW-MAJOR** (column-major rendered sideways on-device) and the
 > red/blue banding was **dropped bytes from unpaced blasting** (fix = **ACK-gate each block**), NOT
 > a "per-scanline parity slip" and NOT a byte-swap. The side bar is **aw20216s, not WS2812**.
+> Later the same day (§D7 banner): the custom-QMK LCD path is **portable from sibling source, no
+> logic analyzer** — the screen enable is **C9 (driven high)**, **not B7** (B7 is the aw20216s LED
+> EN only). See `research/custom-qmk-lcd-port-plan.md`.
 
 > **HEADS UP (2026-07-02):** Several long-standing claims below are now proven WRONG by a live
 > reverse-engineering session (live captures of the vendor app + capstone disassembly of two
@@ -201,6 +204,12 @@ dance, combos, key overrides, QMK settings, VialRGB. (Read path must be added to
 lighting only writes; port the-via `keyboard-api.ts` request/response queue. Keycodes 16-bit
 big-endian; flat↔matrix `i = row*15 + col`; bulk offset `layer*90*2 + i*2`.)
 
+> **Encoder CW/CCW direction — FLAGGED, unconfirmed on hardware (2026-07-04).** VIA/QMK's
+> encoder map convention puts **CCW at index 0** (CW at index 1), but the al80-studio app currently
+> treats **index 0 as CW**. If encoder-bound actions come out reversed, this off-by-one convention
+> mismatch is the suspect. Not yet verified on the physical AL80 — resolve by binding two distinct
+> keycodes and turning the knob.
+
 ### D5. Wireless / radio subsystem — NO new command surface (dead end for control)
 
 The BLE/2.4G radio is a **separate "SmartBLE" UART coprocessor** (vendor i-chip.cn, BLE adv name
@@ -232,7 +241,31 @@ patch to the `rgblight` engine (kill rainbow / static / follow-keys / brightness
 exact CS/SW channels for the 3 bar LEDs (extract `rgblight` setleds from `RIPPLE.bin`, or a SPI1
 logic-analyzer decode).
 
-### D7. Custom QMK — compiled, keys+RGB work, LCD forwarding still blocked
+### D7. Custom QMK — compiled, keys+RGB work, LCD forwarding ~~blocked by B7~~ → PORTABLE FROM SOURCE (C9)
+
+> **SUPERSEDED (2026-07-04, later same day) — the "B7 is the deciding pin / needs a logic-analyzer
+> capture" conclusion in the paragraph below is WRONG.** Reading the AL80 factory stub + b75Pro
+> sibling source shows the LCD/screen path is **portable into custom QMK from source alone — no
+> logic analyzer.** Full plan + receipts: `research/custom-qmk-lcd-port-plan.md`.
+> - **The LCD/screen enable is `C9`, driven HIGH — not B7.** Receipt: the AL80 factory stub
+>   `research/mk856-src/repo/yunzii/al80/unpacked/mk856src/mk856.c:20-31` runs, in
+>   `keyboard_post_init_kb`, `setPinOutput(C9); writePinHigh(C9)` alongside
+>   `setPinOutput(B7); writePinLow(B7)` and `setPinInput(B9)`. So the factory drives **B7 low**, C9
+>   high, and B9 is an input. `common.h:83` names the pin `LCD_SWITCH C9`.
+> - **B7 is the aw20216s LED-driver EN ONLY** (`config.h:42-43` DRIVER_1_EN / DRIVER_2_EN) — it is
+>   *not* a screen-control line, and there is no B7/screen double-duty. The v1–v6 custom builds
+>   fixated on B7 and **never drove C9**, which is the real reason the panel stayed dark.
+> - **The fix = drive C9 high + forward the raw-HID 0x40/0x41/0x42 stream to USART3** (PC10 TX /
+>   PC11 RX) at **460800 8N1** — the AL80's own RIPPLE.bin baud (already in §D1). The b75Pro sibling
+>   source (`mk25047.c:170` `{ .speed = 921600 }`) is a **different board**; treat any bare 921600 in
+>   a screen / custom-QMK context as b75Pro-specific, only a fallback to try if a 460800 flash
+>   renders blank.
+> - **No logic-analyzer capture is needed.** The one residual (whether the physical AL80 rev uses
+>   C9-high or the b75Pro's B3-active-low enable — both are in source) is resolved by *flashing and
+>   watching the screen*, not by probing.
+>
+> The original scope-blocked write-up is kept below for history; read it knowing the B7 premise is
+> retired.
 
 Compiled a custom **vial-qmk** build (aw20216s matrix, VialRGB per-key + live keymap/macros, a
 user-recolorable `PALETTE_CYCLE` effect, LCD raw-HID pass-through). Bins in `firmware/`
@@ -445,6 +478,7 @@ value. Every "color / theme / background / dynamic color" option in the vendor a
 | Time data checksum | `CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF` |
 | 12-hour hour value | `HH = (hour24 % 12) || 12` |
 | Re-sync interval | ~60 s (keyboard free-runs its own clock and drifts) |
+| Custom-QMK LCD enable | **C9 driven HIGH** (factory stub `mk856.c:20-31`, `common.h:83 LCD_SWITCH C9`). **B7 = aw20216s LED-driver EN only**, NOT the screen. Forward raw-HID → USART3 (PC10/PC11) @ **460800 8N1** (921600 = b75Pro-specific fallback). Portable from source, no logic analyzer — see §D7 / `research/custom-qmk-lcd-port-plan.md` |
 | DO NOT TOUCH | commands 0xB0–0xB7 (bootloader / DFU — brick risk) |
 
 ## Glossary

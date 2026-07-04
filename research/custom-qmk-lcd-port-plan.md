@@ -18,8 +18,10 @@ stub** (`yunzii/al80/mk856.c`). Reconcile against the earlier AL80-specific RE (
 - **The genuinely new, likely-decisive finding: the LCD enable is `C9`, driven HIGH** (AL80
   factory stub `mk856.c:20-31`; `common.h:83` `LCD_SWITCH C9`). The prior custom-firmware attempts
   (v1–v6) fixated on **B7** and **never drove C9** — which plausibly explains why the screen stayed
-  dark. B7 is the aw20216s LED-driver enable (`config.h:42-43`); it is *not* the screen enable.
-  The "B7 is the deciding pin" note in memory was chasing the LED pin. **Drive C9 high.**
+  dark. B7 is the aw20216s LED-driver enable (b75Pro `config.h:42-43` `DRIVER_1_EN`/`DRIVER_2_EN`;
+  corroborated on the AL80 by the factory stub `mk856.c`, which drives B7 low as a pin *separate*
+  from C9). It is *not* the screen enable. The "B7 is the deciding pin" note in memory was chasing
+  the LED pin. **Drive C9 high.**
 - **Baud: use 460800 for the AL80, NOT the b75Pro's 921600.** The `mk25047.c:170`
   `{ .speed = 921600 }` is the b75Pro board. The AL80's own RIPPLE.bin was RE'd at **460800 8N1**
   (confirmed earlier; the prior 921600 "hit" was flagged a false positive from a b75Pro string).
@@ -99,7 +101,7 @@ switch (data[0]) {
 
 | Function | Pin | Source |
 |---|---|---|
-| aw20216s driver EN (both ICs) | **B7** | `config.h:42-43` DRIVER_1_EN / DRIVER_2_EN |
+| aw20216s driver EN (both ICs) | **B7** | b75Pro `config.h:42-43` DRIVER_1/2_EN; AL80 `mk856.c` (B7 low, separate from C9) |
 | aw20216s SPI | SCK A5 / MISO A6 / MOSI A7 / CS1 C4 / CS2 B8 | `config.h:35-41` |
 | **Screen data** | **PC10 TX / PC11 RX** | `mk25047.c:1227-1228` |
 | **Screen enable** | **C9 high** (AL80) / B3 low (b75Pro) | `mk856.c:28-29` / `mk25047.h:14` |
