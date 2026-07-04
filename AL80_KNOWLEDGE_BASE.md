@@ -1,20 +1,28 @@
 ---
 title: YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
 status: active
-updated: 2026-07-02
+updated: 2026-07-04
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
-scope: HID protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, VIA keymap
-confirmed: FULLY DECODED — protocol re-derived from web JS + desktop Qt app (§14). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE (corrected 2026-07-02; was mis-stated as 112×137).
+scope: HID + PK_* display protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, picture DISPLAY/commit, VIA keymap, custom-QMK + hardware RE
+confirmed: FULLY DECODED — HID upload protocol re-derived from web JS + desktop Qt app (§14) AND the display module's PK_* commit protocol RE'd from RIPPLE.bin + b75Pro sibling source (§D, 2026-07-04). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE ROW-MAJOR. Picture DISPLAY solved (PK_ADD_PIC commit + two settles, NO trailing view switch). Banding = dropped bytes, fix = ACK-gating (parity-slip + column-major theories retired). now-playing LIVE on-device. Wireless/battery/side-bar RE done; custom QMK compiles (LCD-on-custom still blocked by B7).
 ---
 
 # YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
 
 Self-contained reference so this project can be resumed cold by a human or another AI.
 Consolidated from all sessions: the HID protocol reverse-engineered for the YUNZII AL80's
-LCD panel, the 12-hour clock hack, the confirmed image pixel format (RGB565 big-endian) and
-display resolution (**96×160** — corrected 2026-07-02, see the corrected-protocol section
-below; older text says 112×137), the still-image and GIF packet structure, the tooling built,
-the read-only command-sweep result, open questions, and future modification ideas.
+LCD panel, the display module's **PK_* commit protocol** (how to actually SHOW a picture), the
+12-hour clock hack, the confirmed image pixel format (RGB565 big-endian, **row-major**) and
+display resolution (**96×160** — corrected 2026-07-02), the still-image and GIF packet structure,
+the tooling built, the read-only command-sweep result, custom-QMK + hardware RE, open questions,
+and future modification ideas.
+
+> **HEADS UP (2026-07-04):** The **`## 2026-07-04` section up top is the newest ground truth** —
+> read it first. It cracks the picture **DISPLAY** protocol (`PK_ADD_PIC` commit + two mandatory
+> settles + NO trailing view switch → now-playing displays and stays), and it **retires two wrong
+> theories**: the panel is **ROW-MAJOR** (column-major rendered sideways on-device) and the
+> red/blue banding was **dropped bytes from unpaced blasting** (fix = **ACK-gate each block**), NOT
+> a "per-scanline parity slip" and NOT a byte-swap. The side bar is **aw20216s, not WS2812**.
 
 > **HEADS UP (2026-07-02):** Several long-standing claims below are now proven WRONG by a live
 > reverse-engineering session (live captures of the vendor app + capstone disassembly of two
@@ -25,6 +33,15 @@ the read-only command-sweep result, open questions, and future modification idea
 ---
 
 ## 2026-07-02 (overnight) — picture-page banding root cause + loose ends closed
+
+> **SUPERSEDED (2026-07-04) — the banding root cause below is WRONG.** The "per-scanline 1-byte
+> parity slip" / "byte-swap alternate scanlines" theory was disproven on-device: a byte-swap would
+> band a *solid* color too, and the fix (`lab.html` pre-swap) never rendered clean. Real cause =
+> **dropped bytes from blasting the USART3 stream with no flow control** (RX overrun flips hi/lo
+> alignment → red/blue), fixed by **ACK-gating each block** (`hid.sendAckGated`, on-device CLEAN).
+> The panel is **ROW-MAJOR** (column-major rendered sideways). See §D3 in the 2026-07-04 section.
+> The "loose ends closed" items further down (GIF frame count/rate, no clock-bg-color command,
+> WebHID length) remain correct.
 
 Full write-up: `research/2026-07-02-picture-page-banding-investigation.md`.
 
@@ -48,8 +65,11 @@ harness deployed at **`al80-studio/lab.html`** (green probe → swap-odd → swa
 
 **Same-family reference:** AttackShark K86 / X85 Pro (VID 0x3151) — documented protocols on
 GitHub (`EricOFreitas/attackshark-x85pro-linux`, `Xynthera/AttackShark_K86_Spotify`). Same silicon:
-RGB565 BE, 56-byte chunks, Report ID 0, 64-byte reports, **column-major** packing (our AL80 vendor
-data is row-major — resolve orientation on real photos), oversized framebuffer with off-screen rows.
+RGB565 BE, 56-byte chunks, Report ID 0, 64-byte reports, **column-major** packing, oversized
+framebuffer with off-screen rows.
+> **CORRECTION (2026-07-04):** the AttackShark **column-major** layout does NOT apply to the AL80.
+> Rendering column-major put the AL80 image SIDEWAYS on-device — **the AL80 panel is ROW-MAJOR**
+> (confirmed). Use the AttackShark repos for the *chunk/handshake* pattern, not the pixel order.
 
 **Loose ends closed:**
 - **GIF frame count / rate** (last open item): frame count = last byte of the FINAL type-0x12;
@@ -62,6 +82,193 @@ data is row-major — resolve orientation on real photos), oversized framebuffer
   keyboard-power settings on the outer `setDeviceMessage 0x13` channel. No battery query exists.
 - **WebHID length:** Chromium rejects wrong-length reports (doesn't truncate); vendor sends
   **63-byte** reports (we send 64; Windows pads/truncates the harmless pad byte).
+
+---
+
+## 2026-07-04 — Picture DISPLAY protocol cracked + now-playing LIVE + full-system RE
+
+Full write-ups: `al80-studio/host/nowplaying-display-debug.md`,
+`research/2026-07-03-overnight-custom-qmk-summary.md`, `research/al80-qmk-hardware-params.md`,
+and the memory note `al80-lcd-project`.
+
+The big unlock this session: **how to actually SHOW a written picture.** Every prior session
+could *write* a still image (549/549 blocks ACKed, transport perfect) but the panel kept showing
+an OLD picture. Turns out that was never a pixel problem — it's a **display/commit protocol**
+problem, and two other long-standing claims (the "parity-slip" banding theory and the
+"column-major" fix) are now **proven wrong on-device.** This section supersedes them; see the
+inline correction markers added to §7 and the 2026-07-02 overnight section above.
+
+### D1. The display module speaks a `PK_*` protocol over USART3 (CONFIRMED)
+
+The STM32F103 keyboard MCU does NOT render pixels — it forwards our HID stream to a **separate
+smart display module** over USART3 (460800 8N1, TX PC10 / RX PC11). The module runs its own
+`PK_*` command set. **The wire opcode = the PK enum ordinal** (RE'd from `RIPPLE.bin` + the
+sibling b75Pro QMK source `mk856-src/repo/yunzii/b75Pro/.../mk25047/` — `uart_mod.h`,
+`keyboard_screen.c`, `mk25047.c`):
+
+    0x0B  PK_GO_HOME      switch to the clock/home view
+    0x0C  PK_ADD_PIC      commit the received scratch buffer to a slot AND display it   ← the key one
+    0x0D  PK_TOGGLE_PIC   advance to the NEXT stored slot (NOT "show this frame")
+    0x0E  PK_DEL_PIC      delete a stored picture slot
+    0x0F  PK_GO_GIF       switch to the GIF view
+    0x10  PK_GUI_EVENT    GUI / view-state event (the still-image "announce" rides this)
+    0x12  PK_GIF_NUM      GIF slot/count select
+    0x13  PK_GIF_FRAME    GIF per-frame op
+
+> **CORRECTION — supersedes the §5a/§7 "view-switch" framing.** The still-image **SETUP packet
+> `A5 5A 0C <len>` IS `PK_ADD_PIC` (0x0C)** — it is not just a "length declaration," it's the
+> commit-and-display command. And type **0x0D is `PK_TOGGLE_PIC` = advance-to-next-slot**, NOT a
+> "switch to picture view / show this frame" command as older text implied. Pictures are
+> **slot-based and cyclic**: there is no random-access "show slot N" opcode (GIFs get
+> `PK_GIF_NUM` 0x12 for their slot). This is why a "switch to picture page" keypress shows
+> *whatever slot the cursor is on*, not necessarily the frame you just wrote.
+
+### D2. Working still-image DISPLAY sequence (CONFIRMED end-to-end on-device)
+
+    announce   PK_GUI_EVENT   (0x40, type 0x10)           40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01
+    --- settle 300 ms ---   (module must process the announce)
+    setup      PK_ADD_PIC     (0x41, type 0x0C, len)      41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93   ; len 0x7800 = 30,720
+    --- settle 30 ms ---    (module must arm the ADD_PIC commit)
+    data                      549 × 56-byte blocks, ACK-GATED (see D3)   ; 548×56 + 1×32 tail
+    finish                    (0x42)                       42 00 00 38 7A
+    --- NO trailing view switch ---
+
+**Both settles are MANDATORY.** The module has to process the announce (0x10) and arm the
+ADD_PIC commit (0x0C) *before* the pixels arrive. Blast the announce + setup back-to-back and the
+frame lands in the module's scratch buffer, acks 549/549 cleanly, and **never commits or displays**
+— the old picture just stays. `lab.html` displayed fresh frames because it happened to pace the
+announce/setup; `device.js` blasted them and didn't, which is the entire "acks perfectly but shows
+old" mystery. (Empirically 300 ms / 30 ms; smaller may work, untuned.)
+
+> **DO NOT send a trailing `buildView(PICTURE)` (0x0D).** That's `PK_TOGGLE_PIC`, which advances
+> PAST the just-committed frame to the next stored slot — the exact "shows the new card for half a
+> second, then flips to an old picture" symptom. `PK_ADD_PIC` already displays the committed
+> frame and it *stays*. Older text (§C2, §7) said "the upload auto-shows, no view switch needed" —
+> that's right about the auto-show, but the reason is `PK_ADD_PIC`, and adding a view-switch after
+> actively breaks it.
+
+**Evidence (flash-address citations):**
+- Ripple raw-HID `0x40/0x41/0x42` handler = a **dumb USART passthrough @ `0x08007FE8`**:
+  takes a semaphore (bit 21), `sdWrite`s the report body to **SD3 (USART3)**, acks with the
+  `0x55`/`0x0F` ready/busy bytes. It does not parse A5 5A or RGB565 — the display module does.
+- `PK_ADD_PIC` is a **non-transmitting stub @ `0x08004ECA`** in the STM32 (host-originated only;
+  the keyboard never generates it, it only relays ours).
+- Sibling confirmation: b75Pro `mk25047.c` / `keyboard_screen.c` / `uart_mod.h` carry the same
+  `PK_*` enum in source form (byte-identical protocol family; the AL80 binary's strings match).
+
+### D3. Banding ROOT CAUSE — corrects the record (both prior theories were WRONG)
+
+The AL80 picture stream is **ROW-MAJOR.** Confirmed on-device: rendering **column-major** put the
+image **SIDEWAYS** on the panel. The column-major theory was borrowed from the AttackShark K86/X85
+sibling, whose panel packs the other way — **wrong for this display.**
+
+> **CORRECTION — supersedes the 2026-07-02 overnight "per-scanline parity slip" theory AND the
+> "column-major fix" / "render-side stride slip" candidates.** Neither is real. A byte-swap or a
+> stride slip would band a *solid* color too, and the on-device behavior didn't match. The red/blue
+> banding was **dropped bytes from blasting the raw-HID / USART3 stream too fast with no flow
+> control** — an RX overrun on the module drops one byte, which flips the hi/lo alignment of every
+> following RGB565 pixel (`F8 00` ↔ `00 F8` = red ↔ blue). The band moved run-to-run — the textbook
+> dropped-byte signature, not geometry.
+
+**THE FIX = ACK-gate each block** (`hid.sendAckGated`, on-device CONFIRMED clean, commit `ed52869`):
+wait for the module's ready echo (`byte[6] = 0x55`) after each 56-byte `0x41` block before sending
+the next; match the op **and the FULL offset (lo + hi)** in the echo; **resend a block up to 4×** if
+the ack is missed (each block is idempotent — it carries its own destination offset, so a resend
+can't corrupt state). Generous settles after the announce (300 ms) and setup (30 ms) keep the
+first blocks from slipping (killed the top-of-frame band).
+
+**Do NOT add an artificial inter-block floor delay.** Padding gaps between *already-acked* blocks
+**desyncs the module and makes banding WORSE** (tested). The ack echo is the pacing signal; a fixed
+sleep on top of it is counterproductive. `transposeToColMajor` was reverted (left as an unused util).
+Main page still uses the plain blast; the ack-gated path is for the picture page.
+
+### D4. VIA keymap on ripple — LIVE editing works, no flash (CONFIRMED)
+
+Ripple is a stock QMK **VIA** build (cert source `research/mk856-src/repo/yunzii/al80/`:
+`VIA_ENABLE`, `ENCODER_MAP_ENABLE`, 4 layers, 6×15 matrix = 90 positions, 16 macros, 1 encoder
+C6/C7). So live keymap editing is available on stock firmware with the screen intact.
+
+**LCD view-switch custom keycodes** (the stock Fn+0/9/8 bindings):
+
+    CUSTOM(22) = 0x7E16 = HOME      (Fn+9, PK_GO_HOME)
+    CUSTOM(23) = 0x7E17 = PICTURE   (Fn+8, picture view)
+    CUSTOM(24) = 0x7E18 = GIF       (Fn+0, PK_GO_GIF)
+
+**Supported (solid) standard VIA set:** keymap get/set `0x04/0x05`, bulk buffer `0x12/0x13`, layer
+count `0x11`, encoder `0x14/0x15`, macros `0x0C-0x10`, switch-matrix key tester `0x02/0x03`,
+lighting `0x07-0x09`, protocol version `0x01`. **Out (Vial-only → need custom vial firmware):** tap
+dance, combos, key overrides, QMK settings, VialRGB. (Read path must be added to `hid.js` — today
+lighting only writes; port the-via `keyboard-api.ts` request/response queue. Keycodes 16-bit
+big-endian; flat↔matrix `i = row*15 + col`; bulk offset `layer*90*2 + i*2`.)
+
+### D5. Wireless / radio subsystem — NO new command surface (dead end for control)
+
+The BLE/2.4G radio is a **separate "SmartBLE" UART coprocessor** (vendor i-chip.cn, BLE adv name
+"YUNZII AL80 BT"), talking to the STM32 over **USART1** (base **0x40013800**, 460800 8N1, PA9 TX /
+PA10 RX, `0x55 <len> <payload>` framing). The STM32 accepts **only 3 inbound commands** from the
+radio (`55 03 <cmd> <mode> <data>`): connection status, host lock-LED (caps/num), suspend
+(0xAA)/resume(0xBB). **NOTHING wireless touches RGB, LCD, or config** — all screen/RGB/config
+control is USB raw-HID (0xFF60) only. Going wireless is strictly LESS surface → a dead end for
+liberating the bar/screen/RGB. Exact radio silicon unconfirmed (black box over UART).
+(USART3 @ 0x40004800 = LCD; USART1 @ 0x40013800 = radio — don't confuse them.)
+
+**Battery telemetry — RECOVERABLE on custom QMK** (so it isn't lost by going custom): **ADC1 ch9 =
+PB1**, ratiometric vs the internal Vref (ch17), `battery = adc*1764/vref`, median-of-10 (drop
+min/max, avg middle 8), 10-bit, piecewise-linear %. Source: sibling b75Pro `smart_ble.c` /
+`battery.c` / `adc.c` (strings match the AL80 binary).
+
+### D6. LED side-bar CORRECTION — it's aw20216s, not WS2812
+
+> **CORRECTION — supersedes any "WS2812 side bar / candidate B9 data pin" note (e.g. §7 future
+> ideas, the custom-QMK summary's deferred bar).** The side bar is **NOT a WS2812 strip.** It's
+> **3 more aw20216s LEDs on the same SPI1 bus as the keys** (A5/A6/A7, CS B6/C8, EN B7), driven by
+> a *separate* QMK `rgblight` effect engine (the rainbow) running alongside `rgb_matrix`. That's
+> why the keys can go solid while the bar stays rainbow — two software engines, one LED chip.
+> **B9 = LCD plug-detect INPUT, not LED data.**
+
+So "liberating" the bar is a **software job**, not a hardware mod: on custom QMK add the 3 LEDs to
+`g_aw20216s_leds` and bump the count 84 → 87, give them their own effect; on ripple it's a binary
+patch to the `rgblight` engine (kill rainbow / static / follow-keys / brightness 0). Open item: the
+exact CS/SW channels for the 3 bar LEDs (extract `rgblight` setleds from `RIPPLE.bin`, or a SPI1
+logic-analyzer decode).
+
+### D7. Custom QMK — compiled, keys+RGB work, LCD forwarding still blocked
+
+Compiled a custom **vial-qmk** build (aw20216s matrix, VialRGB per-key + live keymap/macros, a
+user-recolorable `PALETTE_CYCLE` effect, LCD raw-HID pass-through). Bins in `firmware/`
+(`AL80_CUSTOM_QMK_GREEN.bin` v1 … v6). On-device: **keys + RGB work**; **LCD forwarding on custom
+is still blocked.** The deciding pin is **B7** — it doubles as the aw20216s hardware **EN** AND a
+display-module control line the stock FW pulses low to reset the panel. Our firmware held B7 high
+forever, so the module never got its reset and the LCD stayed dark; v6 pulses B7 low→high in
+`keyboard_pre_init_kb` (ends high for RGB, gives the module its reset). Whether one pin can serve
+both is UNRESOLVED — needs a **logic-analyzer capture** of the stock B7 timing. Other gotchas
+logged: `RAW_EPSIZE` must be 64 (QMK default 32 breaks 64-byte raw-HID), the Vial length-guards
+reject non-32 lengths (relax to `<`), and an SWJ/AFIO ordering bug stole 4 matrix columns (fixed
+with one atomic `AFIO->MAPR` write). Full detail: `research/2026-07-03-overnight-custom-qmk-summary.md`.
+
+### D8. now-playing is LIVE on-device (CONFIRMED end-to-end)
+
+A Spotify now-playing card (96×160, album art + title/artist + progress) renders → commits via
+`PK_ADD_PIC` → **displays and stays on-device.** Host: `al80-studio/host/nowplaying-run.mjs` over
+the native node-hid transport `host/device.js` (`node --env-file=.env nowplaying-run.mjs --live`).
+`--sync` tints the RGB to the cover's dominant color. This is the first real payload proving the D2
+display sequence end-to-end with live data.
+
+**Spotify PKCE gotchas (all hit + fixed, from current 2026 docs):**
+- The **refresh token ROTATES** on every refresh — you MUST persist the newly returned
+  `refresh_token` or the old one is revoked (`invalid_grant`).
+- **Cache the access token** (~1 h `expires_in`); refresh only near expiry / on 401 — NOT every poll.
+- `Authorization: Bearer <access_token STRING>` — capital B, case-sensitive; passing the token
+  *object* returns `400 Only valid bearer authentication supported`.
+- A **dev-mode app** needs the calling account on the allowlist (Settings → User Management) or the
+  API returns **403** (owner needs Premium).
+- Redirect URI must be **`http://127.0.0.1`**, not `localhost` (2025 rule).
+- **Refresh tokens now expire at 6 months** — handle `invalid_grant` → re-auth, don't retry-loop.
+
+App Client ID `4d8da9ff46054c45934a9f508d6928a8` (public, PKCE, no secret); creds in gitignored
+`host/.env`; one-time auth via `host/spotify-auth.mjs` (local 127.0.0.1:8888/callback catcher).
+**Same fix applies to al80-studio's browser Picture tab:** drop `ui.js`'s trailing
+`buildView(PICTURE)`; `sendAckGated` already has the settles.
 
 ---
 
@@ -104,6 +311,13 @@ Flat, no banking. Sequence:
 The upload **AUTO-SHOWS** as a full-screen, image-only view. There is **NO separate view-switch
 command** — uploading the image is what switches the view. (This corrects the older idea that a
 standalone type-0x0D "picture-view" switch is required.)
+
+> **REFINED (2026-07-04):** the "auto-show" mechanism is now known — the setup packet
+> `A5 5A 0C <len>` **IS `PK_ADD_PIC` (0x0C) = commit-the-scratch-buffer-and-display.** For it to
+> actually commit you MUST pace the front of the transfer: **~300 ms after the announce (0x10) and
+> ~30 ms after the setup (0x0C)** before the pixel blocks, or the frame lands in scratch, acks
+> 549/549, and never displays (old picture stays). And do **NOT** send a trailing type-0x0D — that's
+> `PK_TOGGLE_PIC`, it advances past the just-committed frame. See §D1/§D2.
 
 ### C3. GIF / animation — one wire format, a MODE byte with three modes
 
@@ -218,9 +432,13 @@ value. Every "color / theme / background / dynamic color" option in the vendor a
 | LCD HID interface | usagePage 0xFF60, usage 0x61 (raw / VIA) |
 | Report ID / report size | 0 (unnumbered) / 64 data bytes |
 | Display resolution | **96 × 160 px, portrait** (corrected 2026-07-02; was mis-stated 112×137) |
-| Pixel format | RGB565, **big-endian**, 2 bytes/px, row-major, top-left origin |
+| Pixel format | RGB565, **big-endian**, 2 bytes/px, **ROW-MAJOR** (confirmed on-device; column-major = sideways), top-left origin |
 | Full frame size | **30,720 bytes** = 96×160×2 = 548 × 56-byte blocks **+ 1 × 32-byte tail** (byte[3]=0x20, at offset 0x77E0); total len 0x7800 |
 | Screen-op sequence | 0x40 announce → 0x41 data → 0x42 finish |
+| Display module protocol | **PK_* over USART3** (wire opcode = enum ordinal): 0x0B GO_HOME · **0x0C ADD_PIC (commit+display)** · 0x0D TOGGLE_PIC (advance-slot, ≠ show) · 0x0E DEL_PIC · 0x0F GO_GIF · 0x10 GUI_EVENT · 0x12 GIF_NUM · 0x13 GIF_FRAME (see §D1) |
+| Picture DISPLAY sequence | announce(0x10) → **300 ms** → setup/**PK_ADD_PIC**(0x0C,len) → **30 ms** → 549 ACK-GATED data blocks → finish(0x42). **NO trailing view switch** (0x0D = TOGGLE_PIC advances past your frame). See §D2 |
+| Reliable send | **ACK-gate each 0x41 block** (wait for byte[6]=0x55 echo, match op+full offset, resend ≤4×). Fixes banding (dropped bytes). Do NOT add an inter-block floor delay — makes it WORSE. See §D3 |
+| LCD view-switch keycodes | CUSTOM(22)=0x7E16 HOME · CUSTOM(23)=0x7E17 PICTURE · CUSTOM(24)=0x7E18 GIF (stock Fn+9/8/0) |
 | Announce type byte[9] | 0x09 = time, 0x10 = image, 0x12 = GIF |
 | Announce CRC bytes[12,13] | CRC16-MODBUS of bytes[9..11], stored big-endian |
 | Data-packet checksum bytes[4,5] | 16-bit LE = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF` |
@@ -668,6 +886,15 @@ from the auto-sync loop firing mid-transfer — ignore those.
 
 ### View-switch / command table (captured live from the Equipment-setup buttons)
 
+> **CORRECTION (2026-07-04) — these "view-switch" types are `PK_*` commands with real semantics,
+> not neutral page toggles.** RE of the display module (§D1) gives: type **0x0B = PK_GO_HOME**,
+> **0x0D = PK_TOGGLE_PIC (ADVANCE to the next stored picture slot, NOT "show the picture view")**,
+> **0x0F = PK_GO_GIF**. Pictures are slot-based and cyclic (no random-access "show slot N"). The
+> practical consequence: **do NOT send type 0x0D after a still-image upload** — it advances past the
+> frame you just committed (`PK_ADD_PIC` already displayed it). The types below (11/13/15) came from
+> a rev2.1 capture using a **1-based** labeling; the module's actual ordinals are 0x0B/0x0D/0x0F.
+> See §D1/§D2 for the confirmed opcodes and the working display sequence.
+
 Each is an announce + 0x42 finish with **zero data packets**. Values below are from the
 rev2.1 session (not re-derivable from this repo's captures, which didn't press these buttons):
 
@@ -828,9 +1055,10 @@ captures, the web JS bundle, and the desktop Qt app.
 
 - **Clock modes:** countdown/pomodoro timer, second timezone, "run fast" clock.
 - **Smart sync:** align to minute boundary; back off when idle / on battery.
-- **LIVE INFO PANEL** (now fully feasible — format + resolution known): render **96×160**
-  RGB565 frames of CPU/GPU temp+load, now-playing, unread mail, crypto/stock ticker,
-  weather, next calendar event.
+- **LIVE INFO PANEL** (feasible AND now partly shipped — the picture DISPLAY path works, see §D2/§D8):
+  render **96×160** RGB565 frames of CPU/GPU temp+load, now-playing, unread mail, crypto/stock
+  ticker, weather, next calendar event. **now-playing is LIVE on-device** (Spotify card via
+  `host/nowplaying-run.mjs`, commit `67eb4eb`) — the rest are the same render→PK_ADD_PIC path.
 - **View automation:** auto-switch LCD to a GIF on game launch / clock otherwise;
   tie into the VIA app-launcher layer.
 - **Tooling QoL:** config file (12/24hr toggle, interval, tz offset, toast on/off),
