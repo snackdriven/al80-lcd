@@ -13,6 +13,12 @@
 #include "al80.h"
 #include <string.h>
 
+/* Set while an LCD transfer (0x40..0x42) is in flight. aw20216s_flush() checks this and
+ * skips its SPI writes so they can't preempt the interrupt-driven USART3 TX and put gaps in
+ * the byte stream (which shears the image). Watchdog clears it if a transfer stalls. */
+volatile bool g_screen_busy = false;
+static uint16_t screen_busy_wd = 0;
+
 /* ---- user-editable RGB palette store ----
  * al80_palette is the live RAM mirror the PALETTE_CYCLE effect reads. It is
  * seeded at keyboard_post_init_kb: from EEPROM if a valid magic byte is
@@ -147,10 +153,12 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
                 wait_us(5);
             }
 #endif
+            g_screen_busy = true; screen_busy_wd = 200; /* pause RGB SPI during transfer */
             data[6] = 0x55; // ACK
             break;
         }
         case AP_GIVE_SCREEN_SEM: // 0x42
+            g_screen_busy = false; screen_busy_wd = 0; /* transfer done - resume RGB */
             data[6] = 0x55;      // release semaphore -> ACK
             break;
 
@@ -185,6 +193,12 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
             break;
     }
     /* via.c calls raw_hid_send(data, length) for us on return. */
+}
+
+/* Watchdog: resume RGB if an LCD transfer stalls (0x42 lost), so lighting can't freeze. */
+void matrix_scan_kb(void) {
+    if (screen_busy_wd && --screen_busy_wd == 0) g_screen_busy = false;
+    matrix_scan_user();
 }
 
 void keyboard_pre_init_kb(void) {

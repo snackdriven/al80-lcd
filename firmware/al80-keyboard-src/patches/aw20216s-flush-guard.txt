@@ -1,0 +1,14 @@
+    if (driver_buffers[index].pwm_buffer_dirty) {
+        aw20216s_write(cs_pin, AW20216S_PAGE_PWM, 0, driver_buffers[index].pwm_buffer, AW20216S_PWM_REGISTER_COUNT);
+        driver_buffers[index].pwm_buffer_dirty = false;
+    }
+}
+
+void aw20216s_flush(void) {
+    extern volatile bool g_screen_busy;
+    if (g_screen_busy) return; /* AL80: don't jitter the USART3 LCD stream with RGB SPI */
+    aw20216s_update_pwm_buffers(AW20216S_CS_PIN_1, 0);
+#if defined(AW20216S_CS_PIN_2)
+    aw20216s_update_pwm_buffers(AW20216S_CS_PIN_2, 1);
+#endif
+}

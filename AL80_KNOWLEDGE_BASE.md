@@ -352,6 +352,30 @@ standalone type-0x0D "picture-view" switch is required.)
 > 549/549, and never displays (old picture stays). And do **NOT** send a trailing type-0x0D — that's
 > `PK_TOGGLE_PIC`, it advances past the just-committed frame. See §D1/§D2.
 
+### D9. Custom-firmware image SHEAR = UART TX jitter, NOT geometry (CONFIRMED 2026-07-05)
+
+Custom vial-qmk firmware renders images **sheared** (a vertical line → diagonal) while STOCK renders
+clean. Chased wrongly for hours as a width/format/pacing problem — it is NONE of those.
+
+**Proof (RIPPLE.bin disasm):** stock raw-HID handler @ `0x08005fe0` forwards `&buff[7]` for `buff[3]`
+bytes (`ldrb.w r8,[r5,#3]` @ `0x08005f2a`) — **byte-identical** to the custom fw's
+`sdWrite(&SD3,&data[7],data[3])`. So the wire data is correct and the mode-2 96×64 main-page format
+was right all along.
+
+**Actual cause:** the custom fw writes USART3 interrupt-driven while running rgb_matrix (aw20216s SPI
+flush = 2 transactions/refresh) + Vial. Those preempt/mask the serial TX interrupt → **gaps** in the
+byte stream → the self-parsing module re-syncs at a gap → progressive shift → diagonal on PATTERNS,
+invisible on SOLIDS (why solid red looked perfect). Stock has no such contention.
+
+**Fix (custom fw):** gate `aw20216s_flush()` on a `g_screen_busy` flag (set on 0x40, cleared on 0x42;
+watchdog in `matrix_scan_kb`) — `AL80_CUSTOM_QMK_v14_rgbpause.bin`. If insufficient, DMA the USART3 TX
+(hardware-fed, un-jitterable). Byte order = **big-endian, no swap** (module reads BE; solid red = red).
+Baud: stock actual 460800; custom needs the `921600` SETTING to hit actual 460800 (clock/divisor
+difference) — expected quirk, not a bug.
+
+**LESSON:** for "works on stock, fails on custom", disassemble RIPPLE.bin FIRST — the byte-identical
+forward would have killed the entire geometry hunt in one look. See memory `debug-consult-knowledge-first`.
+
 ### C3. GIF / animation — one wire format, a MODE byte with three modes
 
     mode 0 = startup animation   96×160,  cap 64 frames
