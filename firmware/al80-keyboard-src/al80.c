@@ -138,22 +138,9 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
                 data_len = length - 7;
             }
 #if defined(AL80_LCD_ENABLE)
-            /* Pixel data blocks (0x41 whose payload is NOT an A5 5A control frame) are RGB565
-               big-endian from the host; the display module reads little-endian, so swap each
-               2-byte pixel in place. Control frames (A5 5A ...) pass through untouched. Stock
-               firmware does this too, so al80-studio can stay big-endian for both firmwares. */
-            if (data[0] == AP_W_SCREEN_DATA && !(data[7] == 0xa5 && data[8] == 0x5a)) {
-                /* v11: swap RGB565 host-BE -> module-LE into a SEPARATE buffer and forward that,
-                   ruling out any in-place aliasing across sdWrite (the in-place v10 swap no-op'd). */
-                static uint8_t lcd_tx[64];
-                uint8_t n = data_len; if (n > 57) n = 57;
-                uint8_t j = 0;
-                for (; j + 1 < n; j += 2) { lcd_tx[j] = data[8 + j]; lcd_tx[j + 1] = data[7 + j]; }
-                if (j < n) lcd_tx[j] = data[7 + j];
-                sdWrite(&SD3, lcd_tx, n);
-            } else {
-                sdWrite(&SD3, &data[7], data_len);
-            }
+            /* No byte-swap: the display module reads RGB565 big-endian, same as al80-studio
+               sends. Confirmed on-device 2026-07-05 (forced 0xE007 -> red; swapped-to-LE -> blue). */
+            sdWrite(&SD3, &data[7], data_len);
             /* Match the stock/b75Pro handler: a short settle after each block so
                the self-parsing module keeps up with back-to-back writes. */
             if (data[0] == AP_W_SCREEN_DATA) {

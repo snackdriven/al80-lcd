@@ -79,5 +79,26 @@ Confirmed so far (static analysis + disassembly):
 - Lead noted for the WebHID-drop flakiness: `RAW_EPSIZE 64` vs `VIAL_RAW_EPSIZE 32` (vial.h)
   mismatch — Vial's page math assumes 32 while the endpoint is 64.
 
-_(A dedicated research agent was still finalizing the definitive root cause at wrap; its verdict
-appends below when done.)_
+### ⭐ SOLVED (2026-07-05 morning): the module reads BIG-ENDIAN — remove the swap
+
+Clean on-device isolation settled it:
+- An instrumented build forcing `[E0,07]` into the pixel path → screen **RED** (0xE007 big-endian).
+- v11's swap (host-BE → `[00,F8]`) → screen **BLUE** (0x00F8 big-endian).
+Both fit big-endian only. al80-studio already sends big-endian, so the module wants the bytes as-is.
+The swap was the wrong turn; the early "host-LE = red" reading was confounded (stale-hex flash trap
+the research agent found + the then-unfixed banding mis-coloring the gradient).
+
+**THE FIX: `AL80_CUSTOM_QMK_v13_noswap.bin`** — plain `sdWrite(&SD3, &data[7], data_len)`, no swap.
+
+### Do this (supersedes the v11 order above)
+
+1. Flash **`AL80_CUSTOM_QMK_v13_noswap.bin`** (the `.bin`, not a stale `.hex`).
+2. al80-studio big-endian (already reverted; `src/protocol.js:88` = `(v>>8)` first).
+3. Reconnect, send solid red → **expect RED**. Then a gradient/photo → expect clean color (no swap =
+   nothing to corrupt; if the gradient is ALSO clean, the earlier "banding" was just the mis-color).
+4. If red → done. al80-studio stays universal, no host hacks, nothing to commit on the host side.
+   The keyboard source (with the no-swap forward) is backed up in `firmware/al80-keyboard-src/`.
+
+Flash-provenance note (research agent): `qmk flash` / dfu-util use the `.bin`; QMK Toolbox pointed at
+a `.hex` can grab a 2-day-stale one. We stage the fresh `.bin`, and the green-force test proved fresh
+code runs — so provenance is fine for our flow, just don't hand-pick an old `.hex`.
