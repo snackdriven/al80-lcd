@@ -1,85 +1,46 @@
 # AL80 LCD
 
-Reverse-engineering the YUNZII AL80's LCD panel over raw HID, plus the tooling that came out of it. The headline result: a **12-hour clock** on the LCD without reflashing (the stock ripple-lighting firmware stays in place).
+I reverse-engineered the YUNZII AL80's LCD over raw HID, the whole protocol, then kept going well past where I meant to stop. It started as "get a 12-hour clock on the screen without reflashing." It's now the full display protocol, a browser app that drives it, a custom vial-qmk firmware, and a wiki.
+
+The screen turned out to be a separate smart module the keyboard just forwards pixels to over serial. That one fact is the whole story: it's why the LCD keeps working even after you flash custom firmware.
+
+**Start here:** the **[wiki](https://snackdriven.github.io/al80-studio/wiki/)** (protocol reference, firmware guide, hardware notes, how-tos). Firmware **[releases](../../releases/latest)**. The browser control panel lives in the sibling [al80-studio](https://github.com/snackdriven/al80-studio) repo.
 
 ## What's here
 
 | Path | What it is |
 |------|-----------|
-| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up (all sessions merged into one): device identity, HID protocol, the 12hr hack, confirmed display specs + still-image and GIF stream formats, a custom-frame render recipe, open questions, and safety warnings. Start here. |
-| [`tooling/`](tooling/) | Runnable clock-sync scripts (Node + Python), launchers, and a no-install browser-console version. |
-| [`converter/`](converter/) | `al80-image` CLI — converts any image to a still-image LCD transfer (RGB565 BE, 548 blocks). Offline-verifiable dry-run; `--send` writes to the device. |
-| [`research/`](research/) | Raw material: annotated + raw HID captures, device descriptors, unique-packet table, the site's JS bundle, the `image_capture/` test pattern (confirmed the resolution), and `gif_capture/` (decoded the animation protocol). |
-| [`firmware/`](firmware/) | Reference copy of the ripple-lighting firmware this project is built around. Do not reflash casually. |
-| [`lcd-images/`](lcd-images/) | Backup of the GIFs currently loaded on the LCD panel. |
-| [`keymap/`](keymap/) | VIA/QMK keymap export (the layout from the knowledge base, §8). |
-| [`apps/`](apps/) | Version-pinned vendor tools: YUNZII's LCD screen app and QMK Toolbox. |
-| [`llms.txt`](llms.txt) | Curated index for AI agents ([llms.txt](https://llmstxt.org/) format) — points at the knowledge base and key files. |
-| [`docs/llm-friendly-documentation-2026.md`](docs/llm-friendly-documentation-2026.md) | Reusable guide on writing docs for both people and AI agents (the method this repo's knowledge base follows). |
-| [`docs/converter-design.md`](docs/converter-design.md) | Design brief for the image→LCD converter CLI. |
-| [`docs/writeup.md`](docs/writeup.md) | Portfolio-style article on the reverse-engineering (ready to adapt into projects.html). |
+| [`AL80_KNOWLEDGE_BASE.md`](AL80_KNOWLEDGE_BASE.md) | The full write-up in one file: device, HID protocol, the display commit, image/GIF formats, custom firmware, hardware. The wiki is this, split up and searchable. |
+| [`wiki/`](wiki/) | MkDocs source behind the hosted wiki. |
+| [`firmware/`](firmware/) | Custom firmware builds (v1.0.0 = known-good) + the stock RIPPLE recovery bin + source backups. |
+| [`tooling/`](tooling/) | The original no-reflash clock scripts (Node + Python). |
+| [`converter/`](converter/) | `al80-image` — turns any image into a still-image transfer. |
+| [`research/`](research/) | The raw material: HID captures, descriptors, the b75Pro sibling QMK source, test patterns. |
+| [`keymap/`](keymap/) | VIA/QMK keymap export. |
 
-## The short version
+## The gist
 
-The AL80 exposes 4 HID interfaces; only `usagePage 0xFF60 / usage 0x61` (the VIA/raw interface) drives the LCD. Screen operations are a 3-packet sequence over 64-byte reports (report ID 0):
+Four HID interfaces; only `0xFF60 / 0x61` (the VIA/raw one) drives the LCD. A screen op is three 64-byte reports, announce then data then finish, with a 16-bit additive checksum on every packet and a CRC16-MODBUS on the announce.
 
+The clock hack, whole:
 ```
-h     = (hour24 % 12) || 12
-cksum = (0x41 + 0x03 + h + minute + second) & 0xFF
-
-announce  40 00 00 07 F6 02 00 A5 5A 09 00 03 C3 E1
-time      41 00 00 03 <cksum> 00 00 <h> <minute> <second>
-finish    42 00 00 38 7A
+h  = (hour24 % 12) || 12
+40 00 00 07 F6 02 00 A5 5A 09 00 03 C3 E1     announce
+41 00 00 03 <cksum> 00 00 <h> <min> <sec>     time
+42 00 00 38 7A                                 finish
 ```
+The panel draws whatever hour you hand it, so send 1–12 instead of 0–23 and you get a 12-hour clock. No AM/PM. The keyboard free-runs its clock from the last value, so re-sync every ~60s or it drifts.
 
-The LCD displays the raw hour value it's given, so sending `1–12` instead of `0–23` yields a 12-hour clock. There's no AM/PM indicator, and the keyboard free-runs its own clock from the last value set, so the scripts re-sync every ~60s to fight drift.
+Panel: **96×160, RGB565 big-endian, row-major**, 30,720 bytes a frame. (The old "112×137" was a misread; a live capture settled it.) VID `0x28E9` / PID `0x30AF`, wired only. One app holds `0xFF60` at a time, so close the yunzii-game.com tab first.
 
-VID `0x28E9` / PID `0x30AF`. Keyboard must be wired. Only one process can hold the `0xFF60` interface at a time, so close the yunzii-game.com tab before running a script.
+## Where it went
 
-**Display (confirmed):** 112×137 px, portrait, **RGB565 big-endian**, row-major from top-left — 30,688 bytes per full frame. The web app resamples any uploaded image down to native res, so render custom graphics directly at 112×137. Full render recipe in the knowledge base, §12.
-
-## Quick start
-
-Node:
-```
-cd tooling
-npm install node-hid
-node al80_clock.js --once   # test; LCD should update
-node al80_clock.js          # 60s re-sync loop
-```
-
-Python:
-```
-cd tooling
-pip install hidapi
-python al80_clock.py --once
-python al80_clock.py
-```
-
-See [`tooling/README.md`](tooling/README.md) for launchers and auto-start-at-login.
-
-## Status
-
-- **Done & shipped:** 12hr clock sync (confirmed working), full tooling.
-- **Confirmed:** display resolution (112×137) and pixel format (RGB565 BE); the still-image and **GIF animation** packet structure; the fully-framed `0x40` announce header; and **both checksums cracked** — the announce CRC is CRC16-MODBUS over bytes[9..11], and the image data-block field is a 16-bit LE accumulator (seed 121, +56/block). A full custom-image transfer can now be forged end-to-end (knowledge base §12). The "live info panel" is fully feasible.
-- **Open:** the announce 3-byte size field, the accumulator's seed origin, GIF per-frame addressing / frame-count / frame-rate bytes, and the full view-switch command map. Details in the knowledge base, §10.
-- **Note:** display attributes (brightness, grayscale, etc.) are **client-side only** — no device opcode; bake them into your pixel buffer before sending.
-
-## Links
-
-Everything you need to work on this keyboard, in one place:
-
-| Link | What it's for |
-|------|---------------|
-| [usevia.app](https://usevia.app/) | VIA configurator — the only way keymap changes are made here (load `keymap/AL80_QMK__V0106_20251219.json`). No firmware recompile. |
-| [yunzii.com/pages/software](https://www.yunzii.com/pages/software) | YUNZII's downloads: firmware (incl. the ripple build in `firmware/`) and the LCD screen app (`apps/`). |
-| [yunzii-game.com/#/screen](https://yunzii-game.com/#/screen) | The WebHID LCD screen app — uploads images/GIFs to the panel. Its JS bundle is captured in `research/site_assets/`. Close this tab before running the clock scripts (one opener of the `0xFF60` interface at a time). |
-| [docs.qmk.fm](https://docs.qmk.fm) | QMK reference — keycodes, layers, `LT()`/macros used in the keymap. |
+The clock was just the start. Since then: still images and GIFs on the screen, and a custom **vial-qmk firmware** that keeps the LCD and adds Vial, per-key RGB (VialRGB), reactive effects, an independently-colored side LED bar, and a battery gauge. Spotify now-playing runs live on the panel. The flashing walkthrough and the full protocol are in the wiki.
 
 ## Safety
 
-Commands `0xB0–0xB7` are bootloader / firmware-upgrade (DFU). **Don't touch them** — they can brick the device or wipe the ripple firmware, which is the whole reason for the HID-script approach. Stick to `0x40`/`0x41`/`0x42`.
+`0xB0–0xB7` are the bootloader/DFU commands. Don't send them by hand, that's how you brick it. Everything on the LCD side stays on `0x40/0x41/0x42`.
 
-## Note on `research/site_assets/`
+## Not mine
 
-Those files are YUNZII's own web-app assets (from yunzii-game.com), kept here only as reference for decoding the packet builders. They're not my work and carry their original copyright.
+`research/site_assets/` and `firmware/YUNZII_AL80_RIPPLE.bin` are YUNZII's, kept only as reference. Their copyright.
