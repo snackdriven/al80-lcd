@@ -367,11 +367,17 @@ flush = 2 transactions/refresh) + Vial. Those preempt/mask the serial TX interru
 byte stream → the self-parsing module re-syncs at a gap → progressive shift → diagonal on PATTERNS,
 invisible on SOLIDS (why solid red looked perfect). Stock has no such contention.
 
-**Fix (custom fw):** gate `aw20216s_flush()` on a `g_screen_busy` flag (set on 0x40, cleared on 0x42;
-watchdog in `matrix_scan_kb`) — `AL80_CUSTOM_QMK_v14_rgbpause.bin`. If insufficient, DMA the USART3 TX
-(hardware-fed, un-jitterable). Byte order = **big-endian, no swap** (module reads BE; solid red = red).
-Baud: stock actual 460800; custom needs the `921600` SETTING to hit actual 460800 (clock/divisor
-difference) — expected quirk, not a bug.
+**Fix = TWO parts, both required (CONFIRMED WORKING on-device 2026-07-05):**
+1. **Firmware (`AL80_CUSTOM_QMK_v14_rgbpause.bin`):** gate `aw20216s_flush()` on a `g_screen_busy`
+   flag (set on 0x40, cleared on 0x42; watchdog in `matrix_scan_kb`). Kills the UART TX jitter.
+2. **Host (al80-studio):** the MAIN page is a *banked* mode-2 transfer — send it through the
+   per-bank-paced path (`sendGifWithProgress`, ~30ms/bank), NOT the blast (`gap:0`). Once jitter is
+   gone, blasting makes banks overwrite → **white**; pacing lets each bank commit → clean. (ui.js
+   `dest==='main'` now routes to `sendGifWithProgress`.)
+Result: clean split + gradient + text on the main page with the clock. Picture page also works now
+(same jitter fix; it's flat/ack-gated so needed no pacing change). Byte order = **big-endian, no
+swap**. Baud: stock actual 460800; custom needs the `921600` SETTING to hit it (clock/divisor
+difference) — expected quirk. DMA the USART3 TX is an alternative to part 1 but unneeded now.
 
 **LESSON:** for "works on stock, fails on custom", disassemble RIPPLE.bin FIRST — the byte-identical
 forward would have killed the entire geometry hunt in one look. See memory `debug-consult-knowledge-first`.
