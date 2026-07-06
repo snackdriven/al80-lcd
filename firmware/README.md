@@ -16,6 +16,14 @@
 
 Flash via QMK Toolbox: hold **ESC + plug in USB** → stm32duino DFU → flash the `.bin`. Chip is **STM32F103x8** (56 KB app flash — v19/v20 near ~99%; 20 KB RAM). Source backups in `al80-keyboard-src/`.
 
+### Building a new version
+
+`./release.sh <version> "<title>" "<notes>"` is the whole pipeline: builds in WSL, checks it fits the 56 KB flash cap (reads `__flash0_size__` from the ELF — no guessing), stages + commits the bin, and cuts the GitHub release. Aborts before releasing if it overflows.
+
+```
+./release.sh v1.3.0 "per-layer encoder" "Each layer's knob does its own thing."
+```
+
 ## `YUNZII_AL80_RIPPLE.bin`
 
 The YUNZII AL80 **ripple-lighting firmware** — the exact build this whole project is built around. Everything in the repo assumes this firmware stays flashed; the HID-script approach exists precisely so the LCD can be driven **without** reflashing to stock QMK and losing the ripple effect.
