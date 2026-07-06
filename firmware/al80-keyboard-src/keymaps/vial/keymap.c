@@ -3,14 +3,41 @@
  */
 #include QMK_KEYBOARD_H
 
-#ifdef ENCODER_MAP_ENABLE
-const uint16_t PROGMEM encoder_map[][NUM_ENCODERS][2] = {
-    [0] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [1] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [2] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-    [3] = { ENCODER_CCW_CW(KC_VOLD, KC_VOLU) },
-};
-#endif
+/* Hardcoded per-layer encoder (knob). Runs the instant the firmware is flashed:
+ * no Vial layout entry, no ENCODER_MAP, no dynamic-keymap EEPROM seed, so it
+ * can never fall back to KC_NO. Knob-right = clockwise.
+ *   L0 volume, L1 RGB brightness, L2 RGB hue, L3 media prev/next.
+ * RGB layers call the rgb_matrix API directly (RGB_* keycodes do NOT work via
+ * tap_code16 -- they need process_record, not the HID report). */
+bool encoder_update_user(uint8_t index, bool clockwise) {
+    if (index != 0) {
+        return false;
+    }
+    switch (get_highest_layer(layer_state)) {
+        case 1:  // RGB brightness
+            if (clockwise) {
+                rgb_matrix_increase_val();
+            } else {
+                rgb_matrix_decrease_val();
+            }
+            break;
+        case 2:  // RGB hue
+            if (clockwise) {
+                rgb_matrix_increase_hue();
+            } else {
+                rgb_matrix_decrease_hue();
+            }
+            break;
+        case 3:  // media previous / next
+            tap_code16(clockwise ? KC_MNXT : KC_MPRV);
+            break;
+        case 0:
+        default:  // volume
+            tap_code16(clockwise ? KC_VOLU : KC_VOLD);
+            break;
+    }
+    return false;
+}
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [0] = LAYOUT(

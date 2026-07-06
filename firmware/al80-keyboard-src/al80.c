@@ -10,6 +10,7 @@
 #include "raw_hid.h"
 #include "hal.h"
 #include "eeconfig.h"
+#include "dynamic_keymap.h"
 #include "al80.h"
 #include <string.h>
 #include "analog.h"
@@ -113,6 +114,56 @@ static void al80_homepage_init(void) {
     al80_screen_send_u8(0x06, pct);             wait_us(500); /* PK_BATT_QUANTITY               */
     g_screen_busy = false;
     screen_busy_wd = 0;
+}
+
+/* ---- homepage caps/num-lock icons ----
+ * The display module draws the caps/num lock icons from PK_CAPS_STATUS (0x03) / PK_NUMLOCK_STATUS
+ * (0x04) status packets. Stock and the b75Pro sibling push these on every real LED change
+ * (b75Pro keyboard_screen.c reads host_keyboard_leds() and sets PK_CAPS/PK_NUMLOCK flags). The
+ * passthrough here only sent them in the boot batch + the 30s self-heal, so a Caps/Num toggle
+ * lagged up to 30s and looked dead.
+ *
+ * The blocking USART3 send below runs in the single-threaded main loop (~1ms: 2 packets + two
+ * 500us settles), so it MUST only run on an actual caps/num transition. QMK's led_task() is
+ * change-gated, but led_set() (-> led_update_kb) is ALSO called unconditionally on every layer
+ * action (quantum/action.c) and in command mode, passing an UNCHANGED host_keyboard_leds(). v24
+ * sent on every such call, so every layer key / layer-tap did a blocking send and stalled typing +
+ * the encoder. We track last_locks and early-return when caps/num are unchanged, so the wire only
+ * moves on a genuine toggle (a handful of bytes, once). If a transfer is mid-flight we defer via
+ * locks_dirty. */
+static volatile bool locks_dirty = false;
+static uint8_t       last_locks  = 0xFF;   /* caps<<1|num; 0xFF = unknown -> first report syncs */
+
+/* Push caps + num lock to the module. Main-loop context (like al80_battery_push), so the two 500us
+ * settles are fine. Bit map matches al80_homepage_init: caps = leds bit1, num = leds bit0. */
+static void al80_locks_push(void) {
+    uint8_t leds = host_keyboard_leds();
+    g_screen_busy = true;                          /* pause RGB SPI so the tiny packets don't jitter */
+    al80_screen_send_u8(0x03, (leds >> 1) & 1);    /* PK_CAPS_STATUS    */
+    wait_us(500);
+    al80_screen_send_u8(0x04, leds & 1);           /* PK_NUMLOCK_STATUS */
+    wait_us(500);
+    g_screen_busy = false;
+    screen_busy_wd = 0;
+}
+
+/* Called by QMK whenever it (re)binds host LED state - on a real change AND on every layer action.
+ * Only touch the wire when caps/num actually transitioned; otherwise return immediately so plain
+ * typing / layer keys / the encoder never eat a blocking USART3 send. */
+bool led_update_kb(led_t led_state) {
+    bool res = led_update_user(led_state);
+    if (res) {
+        uint8_t cur = (led_state.caps_lock ? 2 : 0) | (led_state.num_lock ? 1 : 0);
+        if (cur != last_locks) {          /* real caps/num edge - everything else early-returns */
+            last_locks = cur;
+            if (g_screen_busy) {
+                locks_dirty = true;       /* wire busy: flushed by housekeeping_task_kb when free */
+            } else {
+                al80_locks_push();
+            }
+        }
+    }
+    return res;
 }
 
 /* ---- user-editable RGB palette store ----
@@ -388,6 +439,10 @@ void housekeeping_task_kb(void) {
     static uint32_t init_timer = 0;
     static uint8_t  boot_inits = 0;   /* run the homepage init a few times over the first ~6s */
     if (!g_screen_busy) {
+        if (locks_dirty) {                 /* a Caps/Num toggle landed mid-transfer; flush it now */
+            locks_dirty = false;
+            al80_locks_push();
+        }
         if (boot_inits < 4) {
             if (timer_elapsed32(init_timer) > 1500) {
                 init_timer = timer_read32();
@@ -420,6 +475,40 @@ void keyboard_pre_init_kb(void) {
     keyboard_pre_init_user();
 }
 
+/* ---- one-time dynamic-keymap fixups (version-gated) ----
+ * The knob-press key sits at matrix [0,14] (the encoder-click position — the
+ * 15th arg of the top LAYOUT row, col pin C13). keymaps/vial/keymap.c ships it
+ * as plain KC_MUTE on all four layers. An older keymap.c seeded a tap-hold
+ * keycode there into the dynamic-keymap EEPROM, and that stale value SURVIVES a
+ * reflash (QMK never erases the emulated EEPROM on flash), so the mute key gets
+ * a ~200ms tap-hold delay on-device. This runs once per fixups-version to
+ * surgically rewrite ONLY that one key back to KC_MUTE, leaving every other
+ * dynamic-keymap customization intact.
+ *
+ * Gating byte lives in the fixed EECONFIG_USER dword — a core eeconfig field at
+ * a constant address, NOT the KB datablock and NOT the dynamic-keymap region.
+ * So stamping it disturbs nothing: not the palette/side-bar sub-blocks (KB
+ * datablock, magics 0x5A/0x5B) and not DYNAMIC_KEYMAP_EEPROM_START (anchored to
+ * EECONFIG_SIZE = base + KB_DATA_SIZE + USER_DATA_SIZE, none of which change).
+ * Growing the KB datablock instead WOULD shift EECONFIG_SIZE and scramble the
+ * whole stored keymap, which is exactly why we don't. */
+#define AL80_KNOB_ROW       0
+#define AL80_KNOB_COL       14
+#define AL80_FIXUPS_VERSION 1   /* bump to re-run fixups after a future keymap change */
+
+static void al80_apply_dynamic_keymap_fixups(void) {
+    uint32_t ecu = eeconfig_read_user();
+    if ((ecu & 0xFFu) == AL80_FIXUPS_VERSION) {
+        return;   /* already applied — never fight a later user remap of this key */
+    }
+    /* keymap.c has KC_MUTE at [0,14] on every layer; restore each one. */
+    for (uint8_t layer = 0; layer < DYNAMIC_KEYMAP_LAYER_COUNT; layer++) {
+        dynamic_keymap_set_keycode(layer, AL80_KNOB_ROW, AL80_KNOB_COL, KC_MUTE);
+    }
+    /* Preserve the upper 3 bytes of the user dword; stamp only the version byte. */
+    eeconfig_update_user((ecu & 0xFFFFFF00u) | AL80_FIXUPS_VERSION);
+}
+
 void keyboard_post_init_kb(void) {
     /* Free PA13/14/15 + PB3/4 from SWD/JTAG so the matrix can use them */
     AFIO->MAPR = (AFIO->MAPR & ~AFIO_MAPR_SWJ_CFG_Msk);
@@ -442,6 +531,10 @@ void keyboard_post_init_kb(void) {
 
     /* Seed the independent side-bar color from its own EEPROM sub-block. */
     al80_bar_load();
+
+    /* One-time: undo the stale tap-hold on the knob-press key (runs after
+       via_init(), so this write to the dynamic keymap is not clobbered). */
+    al80_apply_dynamic_keymap_fixups();
 
     keyboard_post_init_user();
 }
