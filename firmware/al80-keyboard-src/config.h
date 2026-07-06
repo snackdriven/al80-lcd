@@ -69,3 +69,20 @@
 /* VialRGB effect id for the custom PALETTE_CYCLE effect. High range so it
  * cannot collide with the stock VIALRGB_EFFECT_* ids (which end < 0x40). */
 #define AL80_VIALRGB_PALETTE_CYCLE_ID 0x0100
+
+/* ---- built-in RGB matrix effects (v18: were all off -> only SOLID_COLOR + custom PALETTE_CYCLE
+ * existed, so al80-studio effects no-op'd). Enable the popular non-framebuffer ones. ---- */
+#define ENABLE_RGB_MATRIX_BREATHING
+#define ENABLE_RGB_MATRIX_BAND_VAL
+#define ENABLE_RGB_MATRIX_CYCLE_ALL
+#define ENABLE_RGB_MATRIX_CYCLE_LEFT_RIGHT
+#define ENABLE_RGB_MATRIX_CYCLE_UP_DOWN
+#define ENABLE_RGB_MATRIX_RAINBOW_MOVING_CHEVRON
+#define ENABLE_RGB_MATRIX_CYCLE_OUT_IN
+#define ENABLE_RGB_MATRIX_CYCLE_PINWHEEL
+#define ENABLE_RGB_MATRIX_CYCLE_SPIRAL
+#define ENABLE_RGB_MATRIX_DUAL_BEACON
+#define ENABLE_RGB_MATRIX_RAINBOW_BEACON
+#define ENABLE_RGB_MATRIX_RAINDROPS
+#define ENABLE_RGB_MATRIX_HUE_BREATHING
+#define ENABLE_RGB_MATRIX_HUE_WAVE

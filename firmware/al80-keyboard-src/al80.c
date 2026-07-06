@@ -39,6 +39,10 @@ static uint16_t screen_busy_wd = 0;
 #ifndef AL80_VREF_CAL
 #    define AL80_VREF_CAL 1489
 #endif
+/* On-device the ADC read returned 0 (gauge empty). On USB the keyboard is charging/full, so we
+ * fall back to a fixed charging+full. Real %% needs debugging why B1/ch9 reads 0. */
+#define AL80_BATT_STATUS 1    /* PK_BATT_STATUS: 1 = charging */
+#define AL80_BATT_FULL   100  /* PK_BATT_QUANTITY fallback */
 
 static uint8_t al80_batt_pct(uint16_t mv) {
     if (mv >= BATT_99) return 100;
@@ -50,6 +54,15 @@ static uint8_t al80_batt_pct(uint16_t mv) {
     if (mv <  BATT_80) return ((mv - BATT_60) * 20) / (BATT_80 - BATT_60) + 60;
     if (mv <  BATT_85) return ((mv - BATT_80) * 5)  / (BATT_85 - BATT_80) + 80;
     return ((mv - BATT_85) * 14) / (BATT_99 - BATT_85) + 85;
+}
+
+/* Battery %% to report: use the ADC when plausible, else charging/full (USB). The ADC reads 0
+ * on-device today, so this returns AL80_BATT_FULL until that's debugged. */
+static uint8_t al80_read_batt_pct(void) {
+    int16_t raw = analogReadPin(B1);
+    if (raw <= 0) return AL80_BATT_FULL;
+    uint8_t pct = al80_batt_pct((uint16_t)(((uint32_t)raw * 1764) / AL80_VREF_CAL));
+    return pct < 10 ? AL80_BATT_FULL : pct;  /* implausibly low on USB = bad read */
 }
 
 /* CRC16-MODBUS (init 0xFFFF, poly 0xA001) — al80-studio's announce checksum "ga". */
@@ -73,13 +86,11 @@ static void al80_screen_send_u8(uint8_t type, uint8_t val) {
 /* Read the battery and push PK_BATT_QUANTITY (%) + PK_BATT_STATUS to the module. Caller must
  * ensure no image transfer is in flight (checks g_screen_busy) so the bytes don't interleave. */
 static void al80_battery_push(void) {
-    int16_t  raw = analogReadPin(B1);                 /* ADC1 ch9 */
-    uint16_t adc = raw < 0 ? 0 : (uint16_t)raw;
-    uint16_t mv  = (uint16_t)(((uint32_t)adc * 1764) / AL80_VREF_CAL);
+    uint8_t pct = al80_read_batt_pct();
     g_screen_busy = true;                             /* pause RGB SPI so the tiny packets don't jitter */
-    al80_screen_send_u8(0x06, al80_batt_pct(mv));     /* PK_BATT_QUANTITY */
+    al80_screen_send_u8(0x07, AL80_BATT_STATUS);      /* PK_BATT_STATUS = charging */
     wait_us(500);                                     /* let the module commit before the next packet */
-    al80_screen_send_u8(0x07, 0);                     /* PK_BATT_STATUS: 0 = not-charging/full (charge detect not ported) */
+    al80_screen_send_u8(0x06, pct);                   /* PK_BATT_QUANTITY */
     wait_us(500);
     g_screen_busy = false;
     screen_busy_wd = 0;
@@ -90,9 +101,7 @@ static void al80_battery_push(void) {
  * initializes its homepage gauges from this batch; a lone battery packet may have no widget to
  * fill. Re-sent periodically so it self-heals after a main-page image push clears the homepage. */
 static void al80_homepage_init(void) {
-    int16_t  raw  = analogReadPin(B1);
-    uint16_t adc  = raw < 0 ? 0 : (uint16_t)raw;
-    uint8_t  pct  = al80_batt_pct((uint16_t)(((uint32_t)adc * 1764) / AL80_VREF_CAL));
+    uint8_t  pct  = al80_read_batt_pct();
     uint8_t  leds = host_keyboard_leds();
     g_screen_busy = true;
     al80_screen_send_u8(0x01, 0);               wait_us(500); /* PK_CONN_TYPE   = 0 (USB wired) */
@@ -100,7 +109,7 @@ static void al80_homepage_init(void) {
     al80_screen_send_u8(0x03, (leds >> 1) & 1); wait_us(500); /* PK_CAPS_STATUS                 */
     al80_screen_send_u8(0x04, leds & 1);        wait_us(500); /* PK_NUMLOCK_STATUS              */
     al80_screen_send_u8(0x05, 0);               wait_us(500); /* PK_WINLOCK_STATUS              */
-    al80_screen_send_u8(0x07, 0);               wait_us(500); /* PK_BATT_STATUS = 0             */
+    al80_screen_send_u8(0x07, AL80_BATT_STATUS);wait_us(500); /* PK_BATT_STATUS = charging      */
     al80_screen_send_u8(0x06, pct);             wait_us(500); /* PK_BATT_QUANTITY               */
     g_screen_busy = false;
     screen_busy_wd = 0;
@@ -304,7 +313,7 @@ void housekeeping_task_kb(void) {
         } else if (timer_elapsed32(init_timer) > 30000) {   /* self-heal the widgets */
             init_timer = timer_read32();
             al80_homepage_init();
-        } else if (timer_elapsed32(batt_timer) > 10000) {   /* keep the battery fresh */
+        } else if (timer_elapsed32(batt_timer) > 3000) {   /* keep the battery fresh */
             batt_timer = timer_read32();
             al80_battery_push();
         }
