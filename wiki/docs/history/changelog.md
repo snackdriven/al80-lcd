@@ -16,6 +16,16 @@ conflicts with a reference page, the reference page wins.
     - Panel was **corrected to 96×160** (not 112×137); a dropped **32-byte tail block** had been malforming every image.
     - Retired theories: **column-major** rendering, the **per-scanline parity-slip** banding cause, and **WS2812** side-bar LEDs (it's aw20216s).
 
+## 📦 2026-07-06 — Semver releases start (v1.0.0 → v1.2.0)
+
+Versioning restarted from the messy v2–v21 dev builds into a clean semver line on al80-lcd
+Releases. Each one is a flash-verified `release.sh` cut:
+
+- **v1.0.0** — first stable. Keys + Vial + clean LCD images + battery + **18 RGB effects**. The known-good fallback.
+- **v1.1.0** — **reactive lighting** (splash/reactive effects that light on keypress).
+- **v1.2.0** — **independent side LED bar** (matrix LEDs 76–78, opcodes 0x46/47/48; own colour + brightness, separate from the keys). Current latest.
+- **v1.3.0** *(coming)* — **per-layer rotary encoder** (done, on-device) + **instant caps/num-lock LCD icons** (a `led_update_kb` hook; landing once a lag regression is fixed).
+
 ## 🔋 2026-07-06 — Homepage widget protocol + boot handshake
 
 From b75Pro source: the homepage gauges (connection, OS, lock states, **battery**) are fed by the

@@ -8,13 +8,16 @@
 
 Mined 2026-07-06 from the b75Pro sibling source, `RIPPLE.bin`, and this KB. Every item cites where it came from, so it's checkable, not invented.
 
+!!! success "Shipped since this survey"
+    - **Per-layer encoder** — done and confirmed on-device (v1.3.0). L0 volume, L1 RGB brightness, L2 RGB hue, L3 media. Built as a hardcoded `encoder_update_user`, not `ENCODER_MAP` — the encoder isn't in this board's Vial/VIA layout, so `ENCODER_MAP` was invisible.
+    - **Independent side LED bar** — shipped in v1.2.0 (opcodes 0x46/47/48). The status-meter idea below is the next step on top of it.
+    - **Instant caps/num-lock LCD icons** — in progress via a `led_update_kb` hook, landing in **v1.3.0** once a lag regression is fixed.
+
 ## 🎛️ Cheap firmware wins
 
 | Option | Flash | Value | Where |
 |---|---|---|---|
-| **Per-layer encoder** — the knob is Volume on all 4 layers, but `ENCODER_MAP` is already on. Give each layer its own turn (brightness / hue / scroll / media). | ~tens of B | high | `keymaps/vial/keymap.c:7` |
 | **Screen power-off key** — toggle the C9 enable pin to blank the LCD. This is the "sleep" the KB said didn't exist (it's a GPIO, not an opcode). | ~100 B | high | `al80.c:347` |
-| **Instant caps/lock + connection status** — push from a `led_update_kb()` hook. Caps lags up to 30s today. | ~150 B | med-high | `keyboard_screen.c:253` |
 | **RGB layer indicator** — tint a row per active layer via `rgb_matrix_indicators_advanced_kb()`. | ~300 B | high | KB §D6 |
 | **RGB off on host sleep** — `RGB_MATRIX_SLEEP` isn't set. | ~50 B | med | `config.h` |
 | **Host-free view-switch keys** — keycodes that emit `PK_GO_HOME` / `PK_TOGGLE_PIC` / `PK_GO_GIF`. | ~200 B | med | `mk25047.c:1412` |
@@ -46,6 +49,8 @@ The bar is **3 LEDs already in the matrix at indices 76–78** (driver 1 / CS pi
 
 ## ⭐ Top 3
 
-1. **Per-layer encoder** — highest value-per-byte on the list, and it fixes the most wasted input (knob = volume ×4 today). Ship first.
-2. **Screen power-off key + instant status push** — ~250 B together, both reuse infra already in `al80.c`, and they close two things the KB wrongly concluded were impossible.
+Per-layer encoder shipped (v1.3.0), so the next-best value-per-byte:
+
+1. **Screen power-off key** — ~100 B, reuses the C9 enable already in `al80.c`, and closes something the KB wrongly concluded was impossible (it's a GPIO, not an opcode).
+2. **Side bar as a status meter** — the independent bar colour is already shipped (v1.2.0); the remaining step is driving those three LEDs off battery / caps / layer state (~150 B).
 3. **Probe the undocumented PK opcodes** — a 30-minute send-and-watch, not a build. Highest upside in the survey at near-zero cost; tells you which native features are real before you spend flash.
