@@ -115,6 +115,7 @@ nav:
       - Homepage widgets: firmware/homepage-widgets.md
   - Hardware: hardware/index.md
   - How-to:
+      - Flashing & setup: how-to/flashing-and-setup.md
       - Render a custom frame: how-to/render-a-frame.md
       - Tooling & the 12-hour clock: how-to/tooling-and-clock.md
       - Now-playing (Spotify): how-to/now-playing.md
