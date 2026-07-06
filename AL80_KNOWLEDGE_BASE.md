@@ -382,6 +382,45 @@ difference) — expected quirk. DMA the USART3 TX is an alternative to part 1 bu
 **LESSON:** for "works on stock, fails on custom", disassemble RIPPLE.bin FIRST — the byte-identical
 forward would have killed the entire geometry hunt in one look. See memory `debug-consult-knowledge-first`.
 
+### D10. Homepage widget protocol + boot handshake (from b75Pro source, 2026-07-06)
+
+The homepage gauges (connection, OS, caps/num/win lock, **battery**) are drawn by the display module
+but FED by the keyboard as 1-byte PK status packets. b75Pro `keyboard_screen.c` runs a
+`screen_boot_step` state machine: on boot it pings PK_CONN_TYPE while the screen powers up, then
+pushes the whole widget batch to init the homepage. **The battery is init'd as PART of that batch —
+a lone PK_BATT_QUANTITY may have no widget to fill.** This is why the gauge went empty on custom
+after the first image push (the module kept stock's widget state until the push cleared it, and the
+passthrough never re-inits).
+
+**Full PK_\* opcode map** (b75Pro `uart_mod.h` enum, cross-validated vs al80-studio's announces):
+
+| op | name | payload |
+|----|------|---------|
+| 0x00 | PK_PROTOCOL_RET | module→kb handshake |
+| 0x01 | PK_CONN_TYPE | 0=USB, else wireless mode |
+| 0x02 | PK_OS_TYPE | 0=Win, 1=Mac |
+| 0x03 | PK_CAPS_STATUS | 0/1 |
+| 0x04 | PK_NUMLOCK_STATUS | 0/1 |
+| 0x05 | PK_WINLOCK_STATUS | 0/1 |
+| 0x06 | PK_BATT_QUANTITY | 0-100 % |
+| 0x07 | PK_BATT_STATUS | 0=not-charging/full, 1=charging |
+| 0x08 | PK_LIGHT_MODE | |
+| 0x09 | PK_TIME | [hh,mm,ss] |
+| 0x0A | PK_DATE | [yy,dow,mo,day] |
+| 0x0B | PK_GO_HOME | view→homepage |
+| 0x0C | PK_ADD_PIC / 0x0D TOGGLE / 0x0E DEL | picture ops |
+| 0x0F | PK_GO_GIF | view→gif |
+| 0x10 | PK_GUI_EVENT · 0x11 ADD_GIF · 0x12 GIF_NUM | image/gif upload |
+
+**Packet:** each 1-byte status = `A5 5A <op> 00 01 <crcHi> <crcLo> <val>` (CRC16-MODBUS over
+`[op,00,01]`; same announce+data shape al80-studio uses; the yne checksum is host-only, stripped
+before the module). **Battery read**: ADC1 ch9 (B1) + internal Vref ch17, `mv=adc*1764/vref`,
+piecewise thresholds 3200mV(empty)..4150mV(full).
+
+**v16 (`AL80_CUSTOM_QMK_v16_homepage.bin`)** ports this: `al80_homepage_init()` sends the batch on
+boot (4× over ~6s) + every 30s (self-heal) + battery every 10s. REPLACES v15's lone-battery push.
+UNTESTED on-device. `VREF_CAL=1489` (12-bit) calibratable; charge-status hardcoded 0.
+
 ### C3. GIF / animation — one wire format, a MODE byte with three modes
 
     mode 0 = startup animation   96×160,  cap 64 frames

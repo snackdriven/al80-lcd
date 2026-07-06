@@ -12,12 +12,99 @@
 #include "eeconfig.h"
 #include "al80.h"
 #include <string.h>
+#include "analog.h"
 
 /* Set while an LCD transfer (0x40..0x42) is in flight. aw20216s_flush() checks this and
  * skips its SPI writes so they can't preempt the interrupt-driven USART3 TX and put gaps in
  * the byte stream (which shears the image). Watchdog clears it if a transfer stalls. */
 volatile bool g_screen_busy = false;
 static uint16_t screen_busy_wd = 0;
+
+/* ---- battery telemetry (ported from b75Pro smart_kb16: battery.c / adc.c / keyboard_screen.c) ----
+ * The homepage battery gauge is drawn by the display module but FED by the keyboard: stock sends
+ * PK_BATT_QUANTITY (announce type 0x06, one % byte) + PK_BATT_STATUS (0x07, charge state) over
+ * USART3. A pure passthrough never sends these, so the gauge reads empty. We read ADC1 ch9 (B1),
+ * convert (mv = adc*1764/vref), map to % with b75Pro's piecewise thresholds, and emit the same
+ * A5 5A packets the module expects (CRC16-MODBUS over [type,flag,len], identical to al80-studio). */
+#define BATT_OFF 3200
+#define BATT_5   3300
+#define BATT_10  3470
+#define BATT_40  3630
+#define BATT_60  3760
+#define BATT_80  3930
+#define BATT_85  3980
+#define BATT_99  4150
+/* 12-bit VREFINT count on a 3.3V rail (STM32F103, ~1.20V internal ref). CALIBRATABLE: if the
+ * reported % reads high, raise this; if low, lower it. */
+#ifndef AL80_VREF_CAL
+#    define AL80_VREF_CAL 1489
+#endif
+
+static uint8_t al80_batt_pct(uint16_t mv) {
+    if (mv >= BATT_99) return 100;
+    if (mv <  BATT_OFF) return 0;
+    if (mv <  BATT_5)  return ((mv - BATT_OFF) * 5)  / (BATT_5  - BATT_OFF);
+    if (mv <  BATT_10) return ((mv - BATT_5)  * 5)  / (BATT_10 - BATT_5)  + 5;
+    if (mv <  BATT_40) return ((mv - BATT_10) * 30) / (BATT_40 - BATT_10) + 10;
+    if (mv <  BATT_60) return ((mv - BATT_40) * 20) / (BATT_60 - BATT_40) + 40;
+    if (mv <  BATT_80) return ((mv - BATT_60) * 20) / (BATT_80 - BATT_60) + 60;
+    if (mv <  BATT_85) return ((mv - BATT_80) * 5)  / (BATT_85 - BATT_80) + 80;
+    return ((mv - BATT_85) * 14) / (BATT_99 - BATT_85) + 85;
+}
+
+/* CRC16-MODBUS (init 0xFFFF, poly 0xA001) — al80-studio's announce checksum "ga". */
+static uint16_t al80_crc16(const uint8_t *d, uint8_t n) {
+    uint16_t crc = 0xFFFF;
+    for (uint8_t i = 0; i < n; i++) {
+        crc ^= d[i];
+        for (uint8_t b = 0; b < 8; b++) crc = (crc & 1) ? (crc >> 1) ^ 0xA001 : (crc >> 1);
+    }
+    return crc;
+}
+
+/* One PK announce + 1 data byte to the module: A5 5A <type> 00 01 <crcHi> <crcLo> <val>. */
+static void al80_screen_send_u8(uint8_t type, uint8_t val) {
+    uint8_t  hdr[3] = { type, 0x00, 0x01 };
+    uint16_t crc    = al80_crc16(hdr, 3);
+    uint8_t  pkt[8] = { 0xA5, 0x5A, type, 0x00, 0x01, (uint8_t)(crc >> 8), (uint8_t)crc, val };
+    sdWrite(&SD3, pkt, sizeof(pkt));
+}
+
+/* Read the battery and push PK_BATT_QUANTITY (%) + PK_BATT_STATUS to the module. Caller must
+ * ensure no image transfer is in flight (checks g_screen_busy) so the bytes don't interleave. */
+static void al80_battery_push(void) {
+    int16_t  raw = analogReadPin(B1);                 /* ADC1 ch9 */
+    uint16_t adc = raw < 0 ? 0 : (uint16_t)raw;
+    uint16_t mv  = (uint16_t)(((uint32_t)adc * 1764) / AL80_VREF_CAL);
+    g_screen_busy = true;                             /* pause RGB SPI so the tiny packets don't jitter */
+    al80_screen_send_u8(0x06, al80_batt_pct(mv));     /* PK_BATT_QUANTITY */
+    wait_us(500);                                     /* let the module commit before the next packet */
+    al80_screen_send_u8(0x07, 0);                     /* PK_BATT_STATUS: 0 = not-charging/full (charge detect not ported) */
+    wait_us(500);
+    g_screen_busy = false;
+    screen_busy_wd = 0;
+}
+
+/* Push the full homepage widget set the display module expects at boot (ported from b75Pro
+ * keyboard_screen.c screen_boot_step: conn type, OS type, lock states, battery). The module
+ * initializes its homepage gauges from this batch; a lone battery packet may have no widget to
+ * fill. Re-sent periodically so it self-heals after a main-page image push clears the homepage. */
+static void al80_homepage_init(void) {
+    int16_t  raw  = analogReadPin(B1);
+    uint16_t adc  = raw < 0 ? 0 : (uint16_t)raw;
+    uint8_t  pct  = al80_batt_pct((uint16_t)(((uint32_t)adc * 1764) / AL80_VREF_CAL));
+    uint8_t  leds = host_keyboard_leds();
+    g_screen_busy = true;
+    al80_screen_send_u8(0x01, 0);               wait_us(500); /* PK_CONN_TYPE   = 0 (USB wired) */
+    al80_screen_send_u8(0x02, 0);               wait_us(500); /* PK_OS_TYPE     = 0 (Windows)   */
+    al80_screen_send_u8(0x03, (leds >> 1) & 1); wait_us(500); /* PK_CAPS_STATUS                 */
+    al80_screen_send_u8(0x04, leds & 1);        wait_us(500); /* PK_NUMLOCK_STATUS              */
+    al80_screen_send_u8(0x05, 0);               wait_us(500); /* PK_WINLOCK_STATUS              */
+    al80_screen_send_u8(0x07, 0);               wait_us(500); /* PK_BATT_STATUS = 0             */
+    al80_screen_send_u8(0x06, pct);             wait_us(500); /* PK_BATT_QUANTITY               */
+    g_screen_busy = false;
+    screen_busy_wd = 0;
+}
 
 /* ---- user-editable RGB palette store ----
  * al80_palette is the live RAM mirror the PALETTE_CYCLE effect reads. It is
@@ -199,6 +286,30 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
 void matrix_scan_kb(void) {
     if (screen_busy_wd && --screen_busy_wd == 0) g_screen_busy = false;
     matrix_scan_user();
+}
+
+/* Push the battery to the module's homepage gauge every 10s (first push ~2s after boot), but
+ * never while an image transfer is in flight (would interleave bytes on USART3). */
+void housekeeping_task_kb(void) {
+    static uint32_t batt_timer = 0;
+    static uint32_t init_timer = 0;
+    static uint8_t  boot_inits = 0;   /* run the homepage init a few times over the first ~6s */
+    if (!g_screen_busy) {
+        if (boot_inits < 4) {
+            if (timer_elapsed32(init_timer) > 1500) {
+                init_timer = timer_read32();
+                boot_inits++;
+                al80_homepage_init();
+            }
+        } else if (timer_elapsed32(init_timer) > 30000) {   /* self-heal the widgets */
+            init_timer = timer_read32();
+            al80_homepage_init();
+        } else if (timer_elapsed32(batt_timer) > 10000) {   /* keep the battery fresh */
+            batt_timer = timer_read32();
+            al80_battery_push();
+        }
+    }
+    housekeeping_task_user();
 }
 
 void keyboard_pre_init_kb(void) {
