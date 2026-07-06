@@ -17,7 +17,12 @@ REPO="snackdriven/al80-lcd"
 QMK='export PATH="$HOME/opt/arm/bin:$HOME/.local/bin:$PATH"; cd ~/qmkwork/vial-qmk'
 
 echo "== build (WSL qmk) =="
-wsl.exe -e bash -lc "$QMK; qmk compile -kb yunzii/al80 -km vial" 2>&1 | tail -2
+# dfu-suffix isn't installed here, so qmk returns non-zero on its final (cosmetic) step even
+# though the .bin built fine. Tolerate that, then confirm the .bin genuinely exists below.
+wsl.exe -e bash -lc "$QMK; qmk compile -kb yunzii/al80 -km vial" 2>&1 | tail -2 || true
+if ! wsl.exe -e bash -lc "$QMK; test -f .build/yunzii_al80_vial.bin"; then
+  echo "build failed -- no .bin produced. Aborting."; exit 1
+fi
 
 echo "== verify it fits the flash cap =="
 read -r USED CAP < <(wsl.exe -e bash -lc "$QMK
