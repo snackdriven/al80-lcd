@@ -16,15 +16,15 @@ conflicts with a reference page, the reference page wins.
     - Panel was **corrected to 96×160** (not 112×137); a dropped **32-byte tail block** had been malforming every image.
     - Retired theories: **column-major** rendering, the **per-scanline parity-slip** banding cause, and **WS2812** side-bar LEDs (it's aw20216s).
 
-## 📦 2026-07-06 — Semver releases start (v1.0.0 → v1.2.0)
+## 📦 2026-07-06 — Semver releases start (v1.0.0 → v1.3.0)
 
 Versioning restarted from the messy v2–v21 dev builds into a clean semver line on al80-lcd
 Releases. Each one is a flash-verified `release.sh` cut:
 
 - **v1.0.0** — first stable. Keys + Vial + clean LCD images + battery + **18 RGB effects**. The known-good fallback.
 - **v1.1.0** — **reactive lighting** (splash/reactive effects that light on keypress).
-- **v1.2.0** — **independent side LED bar** (matrix LEDs 76–78, opcodes 0x46/47/48; own colour + brightness, separate from the keys). Current latest.
-- **v1.3.0** *(coming)* — **per-layer rotary encoder** (done, on-device) + **instant caps/num-lock LCD icons** (a `led_update_kb` hook; landing once a lag regression is fixed).
+- **v1.2.0** — **independent side LED bar** (matrix LEDs 76–78, opcodes 0x46/47/48; own colour + brightness, separate from the keys).
+- **v1.3.0** *(latest, shipped 2026-07-06, confirmed on-device)* — **per-layer rotary knob** (L0 volume, L1 RGB brightness, L2 RGB hue, L3 media prev/next; hardcoded `encoder_update_user`) + **instant caps/num-lock LCD icons** (pushed on state change via a gated `led_update_kb`, no more 30s lag). Also **eager debounce** (`DEBOUNCE_TYPE = sym_eager_pk`) for snappier keys — this is what finally killed the mushy knob-press "mute lag." Plus a one-time `dynamic_keymap` fixup that reset the stale mute keycode. v1.0.0 stays the known-good fallback.
 
 ## 🔋 2026-07-06 — Homepage widget protocol + boot handshake
 

@@ -22,8 +22,9 @@ Confirmed on the physical AL80, not just source:
 - **Per-layer rotary encoder** — L0 volume, L1 RGB brightness, L2 RGB hue, L3 media. Built as a hardcoded `encoder_update_user`, **not** `ENCODER_MAP`: the encoder isn't in this board's Vial/VIA layout, so `ENCODER_MAP` was invisible and never fired.
 - **Battery telemetry** — ADC1 ch9 (PB1) ratiometric vs internal Vref, median-of-10, piecewise-linear %.
 - **LCD** — clean still images + clock + GIF over the raw-HID pass-through (C9-high enable).
+- **Instant caps/num-lock LCD icons** — pushed on state change via a gated `led_update_kb` hook, no more 30s lag. Shipped in v1.3.0.
 
-Landing in **v1.3.0**: instant caps/num-lock LCD icons via a `led_update_kb` hook (a lag regression is being fixed first).
+v1.3.0 also switched to eager debounce (`DEBOUNCE_TYPE = sym_eager_pk`) for snappier keys — that's what finally killed the mushy knob-press "mute lag."
 
 !!! success "LCD-on-custom is portable from source — no logic analyzer (2026-07-04)"
     Reading the AL80 factory stub + b75Pro sibling source shows the LCD/screen path can be ported
@@ -76,10 +77,10 @@ both are in source) is resolved by *flashing and watching the screen*, not by pr
 | `v20_reactive` | reactive/splash effects (dropped unused tap-dance/combos/key-overrides to fit) |
 | `v21_ledbar` | **independent side LED bar** colour control (0x46/47/48) |
 | `v23_encoder` | **per-layer rotary encoder** (hardcoded `encoder_update_user`) |
-| `v24_locks` / `v25_locks` | instant caps/num-lock LCD icons (`led_update_kb`) — landing as **v1.3.0** |
+| `v24_locks` / `v25_locks` | instant caps/num-lock LCD icons (`led_update_kb`) + eager debounce (`sym_eager_pk`) — shipped as **v1.3.0** |
 
 The dev bins above fold into the semver releases: **v1.0.0** = keys+Vial+LCD+battery+18 effects,
-**v1.1.0** = reactive, **v1.2.0** = independent LED bar (latest), **v1.3.0** = encoder + lock icons (coming).
+**v1.1.0** = reactive, **v1.2.0** = independent LED bar, **v1.3.0** = encoder + lock icons + eager debounce (latest).
 
 !!! danger "Nothing here reflashes silently"
     All custom bins are experimental. Flashing replaces the ripple firmware. See

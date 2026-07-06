@@ -12,14 +12,14 @@ A from-scratch walkthrough for putting the custom firmware on a YUNZII AL80 and 
 ## ⚠️ Before you start
 
 - This replaces the stock firmware with a custom **vial-qmk** build. It's reversible (stock `.bin` is in the release assets), but you're flashing at your own risk.
-- You keep: all keys, the LCD, the RGB, and the side bar. You gain: Vial keymapping, VialRGB (incl. reactive effects), an independently-coloured side bar, a **working per-layer knob** (volume / RGB brightness / RGB hue / media by layer), battery telemetry, and full LCD control from the browser. Instant caps/num-lock LCD icons land in v1.3.0.
+- You keep: all keys, the LCD, the RGB, and the side bar. You gain: Vial keymapping, VialRGB (incl. reactive effects), an independently-coloured side bar, a **working per-layer knob** (volume / RGB brightness / RGB hue / media by layer), instant caps/num-lock LCD icons, battery telemetry, and full LCD control from the browser.
 - The bootloader is sticky — **ESC + plug** always gets you back to a flashable state, so a bad flash isn't a brick.
 
 ## 📦 What you need
 
 - A **YUNZII AL80** keyboard + its USB cable.
 - **QMK Toolbox** — [github.com/qmk/qmk_toolbox/releases](https://github.com/qmk/qmk_toolbox/releases) (Windows or macOS).
-- The firmware **`.bin`** — from this project's Releases page (grab the latest, currently **v1.2.0**; **v1.3.0** soon).
+- The firmware **`.bin`** — from this project's Releases page (grab the latest, currently **v1.3.0**).
 - **Chrome** (or any Chromium browser) for the control app — WebHID needs it.
 - *(Optional)* **Vial** — [vial.rocks](https://vial.rocks) — for remapping keys and RGB.
 

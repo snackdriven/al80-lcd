@@ -11,7 +11,7 @@ Mined 2026-07-06 from the b75Pro sibling source, `RIPPLE.bin`, and this KB. Ever
 !!! success "Shipped since this survey"
     - **Per-layer encoder** — done and confirmed on-device (v1.3.0). L0 volume, L1 RGB brightness, L2 RGB hue, L3 media. Built as a hardcoded `encoder_update_user`, not `ENCODER_MAP` — the encoder isn't in this board's Vial/VIA layout, so `ENCODER_MAP` was invisible.
     - **Independent side LED bar** — shipped in v1.2.0 (opcodes 0x46/47/48). The status-meter idea below is the next step on top of it.
-    - **Instant caps/num-lock LCD icons** — in progress via a `led_update_kb` hook, landing in **v1.3.0** once a lag regression is fixed.
+    - **Instant caps/num-lock LCD icons** — shipped in v1.3.0. Pushed on state change via a gated `led_update_kb` hook, no more 30s lag. Eager debounce (`sym_eager_pk`) in the same release killed the knob-press mute lag too.
 
 ## 🎛️ Cheap firmware wins
 
