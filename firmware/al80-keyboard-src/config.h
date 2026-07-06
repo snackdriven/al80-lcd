@@ -86,3 +86,7 @@
 #define ENABLE_RGB_MATRIX_RAINDROPS
 #define ENABLE_RGB_MATRIX_HUE_BREATHING
 #define ENABLE_RGB_MATRIX_HUE_WAVE
+/* framebuffer effects (need a per-frame buffer; ~90 bytes on this 6x15 matrix) */
+#define RGB_MATRIX_FRAMEBUFFER_EFFECTS
+#define ENABLE_RGB_MATRIX_DIGITAL_RAIN
+#define ENABLE_RGB_MATRIX_PIXEL_RAIN
