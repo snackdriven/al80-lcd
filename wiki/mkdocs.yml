@@ -78,6 +78,11 @@ markdown_extensions:
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.keys
+  # Emoji + Material/FontAwesome/Octicons icon shortcodes — :material-protocol:, :smile:, etc.
+  # (older Material versions use materialx.emoji.* instead of material.extensions.emoji.*)
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - pymdownx.mark
   - pymdownx.caret
   - pymdownx.tilde

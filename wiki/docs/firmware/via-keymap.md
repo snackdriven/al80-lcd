@@ -6,11 +6,11 @@ scope: Live keymap editing on stock ripple, the VIA command set, and the current
 
 # VIA keymap
 
-Ripple is a stock QMK **VIA** build, so live keymap editing works on stock firmware **with the
-screen intact** — no flash. (Cert source `research/mk856-src/repo/yunzii/al80/`: `VIA_ENABLE`,
+Ripple is a stock QMK VIA build, so live keymap editing works on stock firmware with the
+screen intact, no flash. (Cert source `research/mk856-src/repo/yunzii/al80/`: `VIA_ENABLE`,
 `ENCODER_MAP_ENABLE`, 4 layers, 6×15 matrix = 90 positions, 16 macros, 1 encoder C6/C7.)
 
-## Supported VIA command set
+## ⌨️ Supported VIA command set
 
 **Solid (standard VIA):** keymap get/set `0x04/0x05`, bulk buffer `0x12/0x13`, layer count `0x11`,
 encoder `0x14/0x15`, macros `0x0C–0x10`, switch-matrix key tester `0x02/0x03`, lighting `0x07–0x09`,
@@ -20,10 +20,10 @@ protocol version `0x01`.
 VialRGB.
 
 Read path must be added to `hid.js` (today lighting only writes; port the-via `keyboard-api.ts`
-request/response queue). Keycodes are **16-bit big-endian**; flat↔matrix `i = row*15 + col`; bulk
+request/response queue). Keycodes are 16-bit big-endian; flat↔matrix `i = row*15 + col`; bulk
 offset `layer*90*2 + i*2`.
 
-## LCD view-switch custom keycodes (stock Fn bindings)
+## 📟 LCD view-switch custom keycodes (stock Fn bindings)
 
     CUSTOM(22) = 0x7E16 = HOME      (Fn+9, PK_GO_HOME)
     CUSTOM(23) = 0x7E17 = PICTURE   (Fn+8, picture view)
@@ -34,7 +34,7 @@ offset `layer*90*2 + i*2`.
     app currently treats **index 0 as CW**. If encoder-bound actions come out reversed, this
     off-by-one is the suspect. Resolve by binding two distinct keycodes and turning the knob.
 
-## Current keymap
+## ⌨️ Current keymap
 
 Live layout: `keymap/al80_keymap.json` (4 layers, macros, encoders). The
 `keymap/AL80_QMK__V0106_20251219.json` alongside it is the VIA keyboard *definition*, not the
@@ -46,6 +46,6 @@ bindings. Workflow in usevia.app: Save-JSON → edit → Load-JSON (VIA's blank 
 - **Layer 2** (hold Caps): S=`MACRO(0)` snipping tool, N=`KC_NUM`, Q=`LALT(F4)` close window.
 - **Macro 0** (snip): Down(LGUI) Down(LSFT) Tap(S) Up(LSFT) Up(LGUI).
 
-Export note: VIA's own **Save** button always works. Programmatic JS export is intermittent —
+Export note: VIA's own Save button always works. Programmatic JS export is intermittent.
 `window.__editedJSON` holds the keymap string when the site allows JS exec, so don't rely on it.
 See `research/via-protocol.md` for the full VIA raw-HID protocol and coexistence notes.

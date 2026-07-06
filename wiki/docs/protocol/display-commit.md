@@ -9,9 +9,15 @@ scope: How the display module actually SHOWS a picture — PK_ADD_PIC commit, ma
 
 The 2026-07-04 unlock: **how to actually SHOW a written picture.** Every prior session could
 *write* a still image (549/549 blocks ACKed, transport perfect) but the panel kept showing an OLD
-picture. That was never a pixel problem — it is a **display/commit protocol** problem.
+picture. That was never a pixel problem. It's a **display/commit protocol** problem.
 
-## The display module speaks `PK_*` over USART3
+!!! tip "TL;DR"
+
+    - The STM32 MCU is a **dumb USART3 passthrough**; a separate smart display module runs the `PK_*` command set (wire opcode = PK enum ordinal).
+    - **`PK_ADD_PIC` (0x0C) commits AND displays** — both settles (300 ms / 30 ms) are mandatory, and do NOT send a trailing view switch (`0x0D PK_TOGGLE_PIC` advances past your frame).
+    - Banding root cause = **dropped USART3 bytes**, not geometry; fix is to **ACK-gate each 56-byte block** (wait for `byte[6]=0x55`).
+
+## 📟 The display module speaks `PK_*` over USART3
 
 The STM32F103 keyboard MCU does **not** render pixels. It forwards the HID stream to a **separate
 smart display module** over **USART3** (460800 8N1, TX PC10 / RX PC11). The module runs its own
@@ -29,11 +35,11 @@ sibling b75Pro QMK source):
 | `0x12` | `PK_GIF_NUM` | GIF slot/count select |
 | `0x13` | `PK_GIF_FRAME` | GIF per-frame op |
 
-Pictures are **slot-based and cyclic** — there is no random-access "show slot N" opcode. A "switch
+Pictures are **slot-based and cyclic**: there is no random-access "show slot N" opcode. A "switch
 to picture page" keypress shows *whatever slot the cursor is on*, not necessarily the frame you
 just wrote.
 
-## Working still-image DISPLAY sequence (confirmed end-to-end)
+## ✅ Working still-image DISPLAY sequence (confirmed end-to-end)
 
     announce   PK_GUI_EVENT   (0x40, type 0x10)     40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01
     --- settle 300 ms ---   (module must process the announce)
@@ -60,9 +66,9 @@ just wrote.
 - Sibling b75Pro source (`mk25047.c` / `keyboard_screen.c` / `uart_mod.h`) carries the same `PK_*`
   enum; the AL80 binary's strings match.
 
-## Banding root cause — dropped bytes, not geometry
+## ⚠️ Banding root cause — dropped bytes, not geometry
 
-The AL80 picture stream is **ROW-MAJOR** (rendering column-major put the image **sideways** —
+The AL80 picture stream is **ROW-MAJOR** (rendering column-major put the image sideways;
 the column-major layout was borrowed from the AttackShark K86/X85 sibling and is wrong here).
 
 !!! warning "Two earlier theories retired"
@@ -75,12 +81,12 @@ the column-major layout was borrowed from the AttackShark K86/X85 sibling and is
 **The fix = ACK-gate each block** (`hid.sendAckGated`, on-device confirmed clean): wait for the
 module's ready echo (`byte[6] = 0x55`) after each 56-byte `0x41` block before sending the next;
 match the op **and the full offset (lo + hi)**; resend a block up to 4× if the ack is missed (each
-block is idempotent — it carries its own destination offset). Generous settles (300 ms / 30 ms)
-keep the first blocks from slipping. **Do NOT add an artificial inter-block floor delay** — padding
+block is idempotent: it carries its own destination offset). Generous settles (300 ms / 30 ms)
+keep the first blocks from slipping. **Do NOT add an artificial inter-block floor delay**: padding
 gaps between already-acked blocks desyncs the module and makes banding *worse*. See
 [Chunking & pacing](chunking-and-pacing.md).
 
-## Homepage widget protocol + boot handshake
+## 🔋 Homepage widget protocol + boot handshake
 
 The homepage gauges (connection, OS, caps/num/win lock, **battery**) are drawn by the display
 module but **fed by the keyboard** as 1-byte `PK_*` status packets. b75Pro `keyboard_screen.c` runs

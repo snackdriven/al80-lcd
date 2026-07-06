@@ -10,7 +10,7 @@ A Spotify now-playing card (96×160, album art + title/artist + progress) render
 `PK_ADD_PIC` → **displays and stays on-device.** This is the first real payload proving the
 [display sequence](../protocol/display-commit.md) end-to-end with live data.
 
-## The host
+## 🔧 The host
 
 - Host: `al80-studio/host/nowplaying-run.mjs` over the native node-hid transport `host/device.js`.
 - Run: `node --env-file=.env nowplaying-run.mjs --live`.
@@ -18,7 +18,7 @@ A Spotify now-playing card (96×160, album art + title/artist + progress) render
 - The same fix applies to al80-studio's browser Picture tab: drop `ui.js`'s trailing
   `buildView(PICTURE)`; `sendAckGated` already has the settles.
 
-## Spotify PKCE gotchas (all hit + fixed, current 2026 docs)
+## ⚠️ Spotify PKCE gotchas (all hit + fixed, current 2026 docs)
 
 - The **refresh token ROTATES** on every refresh — you MUST persist the newly returned
   `refresh_token` or the old one is revoked (`invalid_grant`).
@@ -33,7 +33,7 @@ A Spotify now-playing card (96×160, album art + title/artist + progress) render
 App Client ID `4d8da9ff46054c45934a9f508d6928a8` (public, PKCE, no secret); creds in gitignored
 `host/.env`; one-time auth via `host/spotify-auth.mjs` (local `127.0.0.1:8888/callback` catcher).
 
-## What's next on the same path
+## 📖 What's next on the same path
 
 now-playing is the first live info-panel. The same render → `PK_ADD_PIC` path can drive CPU/GPU
 temp+load, unread mail, a crypto/stock ticker, weather, or the next calendar event — see

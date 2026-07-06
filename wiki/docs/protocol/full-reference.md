@@ -8,11 +8,17 @@ scope: Source-decoded command map, still/GIF upload byte-maps, view-switch and c
 
 Cross-checked against two independent front-ends: the **web app** JS bundle
 (`research/site_assets/index-8Bj3uPPc.js`) and the **desktop app** (`MK856.exe`, a Qt5 native app
-whose export/RTTI symbols name every routine — `HidWriteLCDHead/Data/EndInfo` = 0x40/0x41/0x42,
+whose export/RTTI symbols name every routine: `HidWriteLCDHead/Data/EndInfo` = 0x40/0x41/0x42,
 `WriteDeviceLCDPicture/Gif/GifHead/GifEnd/GIFFrameRate/Time/Date`). Both are front-ends over the
 identical HID protocol.
 
-## Command map (AL80 uses the `GamingKeyboard2` opcode profile)
+!!! tip "TL;DR"
+
+    - Source-decoded from two front-ends (web JS bundle + `MK856.exe`); `0x40/0x41/0x42` = announce/data/finish.
+    - There is **no battery %** in this protocol — `0x55` decodes only a sleep bit.
+    - View-switch `PK_*` commands have real semantics (`0x0D` advances slots — don't send after an upload); the `0xB0-0xB7` DFU sequence is documented **to AVOID**.
+
+## 📖 Command map (AL80 uses the `GamingKeyboard2` opcode profile)
 
     0x10 beginConnect · 0x11 endConnect · 0x12/0x13 get/setDeviceMessage · 0x14/0x15 get/setData ·
     0x16 getKeyboard · 0x17/0x18 get/setKeyMessage · 0x19/0x1A get/setLightMessage ·
@@ -21,11 +27,11 @@ identical HID protocol.
     0x36-0x3B magnetic-axis config · 0x40 announce · 0x41 data · 0x42 finish ·
     0x55 getDongleAndKeyboardStatus · 0xB0-0xB7 firmware/DFU (see Safety)
 
-`getDongleAndKeyboardStatus (0x55)` decodes **only a sleep bit** (`hasSleep = !response[7]`) —
-despite the name there is **no battery %** in this protocol. Per-radio backlight/sleep timers
+`getDongleAndKeyboardStatus (0x55)` decodes **only a sleep bit** (`hasSleep = !response[7]`).
+Despite the name there is **no battery %** in this protocol. Per-radio backlight/sleep timers
 (wired/2.4G/BT) live in the device-config blob at byte offsets 23 / 15,17 / 19,21, not as opcodes.
 
-## Still-image upload (type 0x10) — full byte-map
+## 🖼️ Still-image upload (type 0x10) — full byte-map
 
     announce (0x40):  A5 5A 10 00 01 [crcHi crcLo] 01
     length   (0x41):  A5 5A 0C [lenHi lenLo] [crc]        ; len = width·height·2, BIG-ENDIAN
@@ -35,7 +41,7 @@ despite the name there is **no battery %** in this protocol. Per-radio backlight
 RGB565 packed `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` off a canvas resized with
 `imageSmoothingEnabled=false`, split high-byte-first (`v>>8`, `v&255`).
 
-## GIF upload (types 0x12/0x13) — frame-count + FPS
+## 🎞️ GIF upload (types 0x12/0x13) — frame-count + FPS
 
     start  (0x40):  A5 5A 12 00 02 [crc] [mode] 00        ; mode 0/1/2
     start  (0x41):  A5 5A 13 00 02 [crc] [mode] 00
@@ -51,9 +57,9 @@ RGB565 packed `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` off a canvas resized with
 - **FRAME COUNT** = trailing byte of the type-18 finish (capped 64/160/42 by mode).
 - **FPS** = trailing byte of the type-19 finish (slider **1–60**, default **30**).
 
-## View-switch and clear commands (from source)
+## 📟 View-switch and clear commands (from source)
 
-These `PK_*` commands have real semantics — they are not neutral page toggles. See
+These `PK_*` commands have real semantics: they are not neutral page toggles. See
 [Display commit (PK_*)](display-commit.md).
 
 | Command | type `byte[9]` | subcmd `byte[11]` | Notes |
@@ -76,7 +82,7 @@ picture `0x03E0`, GIF `0xC341`, time-A `0xC3E1`, time-B `0x0150`).
     `CUSTOM(22)=0x7E16 HOME` (Fn+9), `CUSTOM(23)=0x7E17 PICTURE` (Fn+8), `CUSTOM(24)=0x7E18 GIF`
     (Fn+0).
 
-## DFU / firmware-upgrade sequence (documented to AVOID)
+## ⚠️ DFU / firmware-upgrade sequence (documented to AVOID)
 
 See [Safety / do-not-touch](../reference/safety.md). Decoded from source:
 `0xB1 toBootLoader` → poll `0xB2 getBootLoaderStatus` → `0xB3 confirmFirmwareInfo` (56-byte header,

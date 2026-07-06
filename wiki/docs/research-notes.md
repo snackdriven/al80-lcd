@@ -11,7 +11,7 @@ plans, and capture tooling that the reference pages were distilled from. This is
 files themselves stay in `research/` (not duplicated here) so the wiki reference pages remain the
 curated, front-loaded version.
 
-## Investigations & playbooks
+## 🔧 Investigations & playbooks
 
 | File | What it is |
 |---|---|
@@ -25,7 +25,7 @@ curated, front-loaded version.
 | `research/vendor-feature-parity.md` | Full vendor app feature + payload inventory |
 | `research/via-protocol.md` | VIA raw-HID protocol and how it shares the 0xFF60 interface |
 
-## Roadmap & design (SPARC)
+## 📖 Roadmap & design (SPARC)
 
 | File | What it is |
 |---|---|
@@ -33,17 +33,17 @@ curated, front-loaded version.
 | `research/al80-always-on-host-SPARC.md` | Resident host that owns the LCD HID interface |
 | `research/al80-nowplaying-webhooks-SPARC.md` | Now-playing + webhook alerts design (shipped: now-playing) |
 
-## Captures & tooling
+## 📦 Captures & tooling
 
-- `research/analyze_captures.py` — verifies the checksum rule against archived captures (4288/4288).
-- `research/captures/`, `research/image_capture/`, `research/gif_capture/` — raw HID captures and
+- `research/analyze_captures.py`: verifies the checksum rule against archived captures (4288/4288).
+- `research/captures/`, `research/image_capture/`, `research/gif_capture/`: raw HID captures and
   test artifacts (test pattern, test GIF, findings).
-- `research/mk856-src/` — sibling b75Pro + AL80 cert QMK source (the `PK_*` enum, factory stub).
-- `research/source-notes/`, `research/site_assets/` — deobfuscated vendor JS bundle notes.
+- `research/mk856-src/`: sibling b75Pro + AL80 cert QMK source (the `PK_*` enum, factory stub).
+- `research/source-notes/`, `research/site_assets/`: deobfuscated vendor JS bundle notes.
 
-## Related repos & files
+## 📖 Related repos & files
 
-- **`al80-studio`** (sibling repo) — the WebHID control panel that drives all of this. `src/protocol.js`
+- **`al80-studio`** (sibling repo): the WebHID control panel that drives all of this. `src/protocol.js`
   is the pure, unit-tested packet builder; `host/nowplaying-run.mjs` is the Spotify host.
-- **`AL80_KNOWLEDGE_BASE.md`** (repo root) — the canonical single-file KB this wiki reorganizes.
-- **`docs/llm-friendly-documentation-2026.md`** — the documentation philosophy this wiki follows.
+- **`AL80_KNOWLEDGE_BASE.md`** (repo root): the canonical single-file KB this wiki reorganizes.
+- **`docs/llm-friendly-documentation-2026.md`**: the documentation philosophy this wiki follows.

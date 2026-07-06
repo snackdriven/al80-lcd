@@ -9,7 +9,7 @@ scope: How byte arrays are split into 0x41 reports, GIF banking, ACK-gating, and
 How a logical byte array becomes `0x41` reports on the wire, and the timing rules that make uploads
 actually commit.
 
-## Chunking rule
+## 📦 Chunking rule
 
 Every logical byte array is split into **`(reportLen − 7)`-byte** payloads (56 at reportLen = 63).
 Each `0x41` report carries its **absolute byte offset little-endian in `bytes[1,2]`**; the final
@@ -23,7 +23,7 @@ Length **descriptors** (the `0x0C` / `0x11` packets) store their value **big-end
 **offset** is **little-endian**. `bytes[4,5]` is always the `yne` additive checksum
 ([Checksums & CRC](checksums.md)).
 
-## Pacing rules by transfer type
+## 🕐 Pacing rules by transfer type
 
 | Transfer | Pacing |
 |---|---|
@@ -31,7 +31,7 @@ Length **descriptors** (the `0x0C` / `0x11` packets) store their value **big-end
 | **GIF** | **30 ms** after setup; per frame `sleep(frameIdx % 16 === 0 ? 3000 : 30)`; **30 ms after each 1024-byte bank**; 30 ms after each finish setup. |
 | **Main page (mode-2, custom firmware)** | Banked transfer — route through the per-bank-paced path (~30 ms/bank), **not** the blast. Blasting makes banks overwrite → white. |
 
-## ACK-gating (picture page reliability)
+## ✅ ACK-gating (picture page reliability)
 
 Wait for the module's ready echo (`byte[6] = 0x55`) after each 56-byte `0x41` block before sending
 the next. Match the op **and the full offset (lo + hi)** in the echo; resend a block up to 4× if the
@@ -43,9 +43,9 @@ corrupt state. This fixes the red/blue banding (dropped bytes) — see
     The ack echo *is* the pacing signal. Padding gaps between already-acked blocks desyncs the
     module and makes banding **worse** (tested).
 
-## Measured throughput (2026-07-01)
+## 🕐 Measured throughput (2026-07-01)
 
-A full 550-packet frame is **HID-write-bound, not device-bound** — and on Windows the killer is
+A full 550-packet frame is **HID-write-bound, not device-bound**. On Windows the killer is
 `setTimeout` resolution, not the USB link:
 
 | Inter-packet gap | Full frame | fps |

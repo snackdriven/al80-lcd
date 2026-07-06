@@ -6,7 +6,13 @@ scope: Device identity, HID interfaces, the panel, the aw20216s LED bar, wireles
 
 # Hardware
 
-## Device identity
+!!! tip "TL;DR"
+
+    - **VID 0x28E9 / PID 0x30AF**; the LCD lives on raw-HID interface **0xFF60 / 0x61** only.
+    - Panel is **96 × 160 RGB565 big-endian, row-major** (30,720 bytes/frame).
+    - The side bar is **aw20216s** (not WS2812), and **wireless is a dead end** for LCD/RGB control.
+
+## 📖 Device identity
 
 | Field | Value |
 |---|---|
@@ -27,20 +33,20 @@ Only `0xFF60/0x61` drives the LCD and accepts the screen-control commands.
 - **0x0001 / 0x06** — boot keyboard.
 - **0x0001 / 0x02 + 0x80** and **0x000C / 0x01** — composite: mouse / system / consumer.
 
-WebHID strips the report ID; OS-level HID libs (hidapi/node-hid) must **prepend a `0x00`
-report-ID byte**, giving a 65-byte write (1 + 64).
+WebHID strips the report ID; OS-level HID libs (hidapi/node-hid) must prepend a `0x00`
+report-ID byte, giving a 65-byte write (1 + 64).
 
-## The display panel
+## 📟 The display panel
 
-- **Resolution: 96 × 160 px, portrait** (corrected from a mis-stated 112×137 — see
+- Resolution: **96 × 160 px**, portrait (corrected from a mis-stated 112×137 — see
   [Still images](../protocol/still-images.md)).
-- **Color: RGB565, big-endian, 2 bytes/px.**
-- **Layout: row-major, top-left origin** (column-major renders sideways).
+- Color: **RGB565**, big-endian, 2 bytes/px.
+- Layout: **row-major**, top-left origin (column-major renders sideways).
 - Full frame = 96 × 160 = 15,360 px = **30,720 bytes**.
-- Driven as a **separate smart display module** over USART3 (460800 8N1, TX PC10 / RX PC11) that
+- Driven as a separate smart display module over USART3 (460800 8N1, TX PC10 / RX PC11) that
   runs the [PK_* protocol](../protocol/display-commit.md). The MCU only forwards bytes.
 
-## LED side-bar — aw20216s, not WS2812
+## 🎨 LED side-bar — aw20216s, not WS2812
 
 !!! warning "Correction — the side bar is NOT a WS2812 strip"
     It is **3 more aw20216s LEDs on the same SPI1 bus as the keys** (A5/A6/A7, CS B6/C8, EN B7),
@@ -52,7 +58,7 @@ So "liberating" the bar is a **software job**, not a hardware mod: on custom QMK
 `g_aw20216s_leds` and bump the count 84 → 87, give them their own effect; on ripple it is a binary
 patch to the `rgblight` engine. Open item: the exact CS/SW channels for the 3 bar LEDs.
 
-## Wireless / radio subsystem
+## 📡 Wireless / radio subsystem
 
 The BLE/2.4G radio is a **separate "SmartBLE" UART coprocessor** (vendor i-chip.cn, BLE adv name
 "YUNZII AL80 BT"), talking to the STM32 over **USART1** (base **0x40013800**, 460800 8N1, PA9 TX /
@@ -66,15 +72,16 @@ radio (`55 03 <cmd> <mode> <data>`): connection status, host lock-LED (caps/num)
     unconfirmed (black box over UART). Don't confuse the two UARTs: **USART3 @ 0x40004800 = LCD**;
     **USART1 @ 0x40013800 = radio**.
 
-## Battery telemetry
+## 🔋 Battery telemetry
 
-**ADC1 ch9 = PB1**, ratiometric vs the internal Vref (ch17): `mv = adc*1764/vref`, median-of-10
-(drop min/max, average the middle 8), 10-bit, piecewise-linear % (3200 mV empty … 4150 mV full).
-Source: sibling b75Pro `smart_ble.c` / `battery.c` / `adc.c` (strings match the AL80 binary).
-**Recoverable on custom QMK**, so it is not lost by going custom. `getDongleAndKeyboardStatus
-(0x55)` exposes **no battery %** — only a sleep bit.
+- **ADC1 ch9 = PB1**, ratiometric vs the internal Vref (ch17): `mv = adc*1764/vref`.
+- Sampling: **median-of-10** (drop min/max, average the middle 8), 10-bit, piecewise-linear %
+  (**3200 mV empty … 4150 mV full**).
+- Source: sibling b75Pro `smart_ble.c` / `battery.c` / `adc.c` (strings match the AL80 binary).
+- **Recoverable on custom QMK**, so it is not lost by going custom.
+- `getDongleAndKeyboardStatus (0x55)` exposes **no battery %** — only a sleep bit.
 
-## Pin map (quick)
+## 🔌 Pin map (quick)
 
 | Signal | Pin(s) | Notes |
 |---|---|---|

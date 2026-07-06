@@ -10,7 +10,7 @@ The tooling in `tooling/` (originally packaged as `al80_12hr_clock.zip`) keeps t
 12-hour clock by re-syncing the time every ~60 s. The hack itself is on
 [Time & Date sync → 12-hour clock hack](../protocol/time-and-date.md).
 
-## What's in `tooling/`
+## 🔧 What's in `tooling/`
 
 - **`al80_clock.js`** — Node (node-hid). Loop or `--once`, file logging, Windows toast after 3
   consecutive failures, crash handlers.
@@ -21,7 +21,7 @@ The tooling in `tooling/` (originally packaged as `al80_12hr_clock.zip`) keeps t
 - Auto-start: shortcut to the hidden `.bat` in `shell:startup`, or Task Scheduler at logon with
   restart-on-failure.
 
-## Core recipe (language-agnostic)
+## 🕐 Core recipe (language-agnostic)
 
 ```text
 h = (hour24 % 12) or 12
@@ -32,7 +32,7 @@ write pad([0x42,0,0,0x38,0x7A])                                          // fini
 // pad() = prepend 0x00 report id (OS libs), then zero-fill to 64 data bytes
 ```
 
-## Gotchas
+## ⚠️ Gotchas
 
 - **Only one opener** of the `0xFF60` interface at a time: close the yunzii-game.com tab (and VIA)
   before running the script, or they fight.
@@ -40,7 +40,7 @@ write pad([0x42,0,0,0x38,0x7A])                                          // fini
   number** instead (enumerate and inspect).
 - The keyboard free-runs its own clock and drifts, which is why the re-sync loop exists.
 
-## RE notes for future capture sessions (yunzii-game.com)
+## 📖 RE notes for future capture sessions (yunzii-game.com)
 
 - The web app holds its **own** device handle (re-acquired via `getDevices()`/request after any
   reconnect). Patching `window.__lcd.sendReport` or `HIDDevice.prototype.sendReport` does **not**

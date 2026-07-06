@@ -7,10 +7,10 @@ scope: End-to-end recipe to forge a still-image transfer for the LCD info-panel
 # How-to: render a custom 96×160 frame
 
 With both checksums cracked, a full still-image transfer can be forged end-to-end. Any client-side
-look (brightness, grayscale, etc.) must be **baked into the pixels first** — there is no device
+look (brightness, grayscale, etc.) must be baked into the pixels first. There is no device
 opcode for it (see [Still images → attributes are client-side](../protocol/still-images.md)).
 
-## Steps
+## 🔧 Steps
 
 1. **Draw** your content on a **96×160** canvas. Apply brightness/grayscale/etc. here.
 
@@ -50,10 +50,10 @@ opcode for it (see [Still images → attributes are client-side](../protocol/sti
 !!! tip "pad()"
     OS-level HID libs prepend a `0x00` report-ID byte, then zero-fill to 64 data bytes.
 
-## Why the settles and ack-gating matter
+## ⚠️ Why the settles and ack-gating matter
 
 Skip the settles and the frame lands in scratch, acks 549/549, and **never displays** (old picture
 stays). Blast the blocks with no flow control and dropped bytes flip pixel alignment → red/blue
-banding. Both are covered in depth on [Display commit (PK_*)](../protocol/display-commit.md) and
+banding. Both are covered on [Display commit (PK_*)](../protocol/display-commit.md) and
 [Chunking & pacing](../protocol/chunking-and-pacing.md). This exact path already renders a live
 Spotify card — see [Now-playing](now-playing.md).
