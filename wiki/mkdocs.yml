@@ -1,0 +1,124 @@
+site_name: YUNZII AL80 Reverse-Engineering Wiki
+site_description: >-
+  Reverse-engineered HID + PK_* display protocol for the YUNZII AL80 keyboard's
+  LCD panel — clock hack, still-image/GIF streaming, picture commit, custom QMK,
+  and hardware notes.
+site_author: snackdriven
+# Set this to your GitHub Pages / Cloudflare Pages URL when you deploy.
+site_url: https://snackdriven.github.io/al80-lcd/
+
+# --- Repo links (edit if the repo name/owner changes) -----------------------
+repo_name: snackdriven/al80-lcd
+repo_url: https://github.com/snackdriven/al80-lcd
+edit_uri: edit/main/wiki/docs/
+
+# --- Theme ------------------------------------------------------------------
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+
+# --- Plugins ----------------------------------------------------------------
+plugins:
+  - search
+  # tags/blog available if you install the plugins; kept minimal for zero-config serve.
+
+# --- Markdown extensions ----------------------------------------------------
+markdown_extensions:
+  # Callouts — the KB's "CORRECTION / SUPERSEDED / HEADS UP" blockquotes map to these.
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
+  - tables
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - toc:
+      permalink: true
+      toc_depth: 3
+
+# --- Navigation / information architecture ----------------------------------
+nav:
+  - Home: index.md
+  - Protocol:
+      - protocol/index.md
+      - Checksums & CRC: protocol/checksums.md
+      - Time & Date sync: protocol/time-and-date.md
+      - Still images: protocol/still-images.md
+      - GIF / animation: protocol/gif-animation.md
+      - Display commit (PK_*): protocol/display-commit.md
+      - Chunking & pacing: protocol/chunking-and-pacing.md
+      - Full byte-map reference: protocol/full-reference.md
+  - Firmware:
+      - Stock & disassembly: firmware/stock-and-disassembly.md
+      - Custom QMK: firmware/custom-qmk.md
+      - VIA keymap: firmware/via-keymap.md
+      - Homepage widgets: firmware/homepage-widgets.md
+  - Hardware: hardware/index.md
+  - How-to:
+      - Render a custom frame: how-to/render-a-frame.md
+      - Tooling & the 12-hour clock: how-to/tooling-and-clock.md
+      - Now-playing (Spotify): how-to/now-playing.md
+  - Reference:
+      - Quick reference: reference/quick-reference.md
+      - Glossary: reference/glossary.md
+      - Safety / do-not-touch: reference/safety.md
+  - History / Changelog: history/changelog.md
+  - Research notes: research-notes.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/snackdriven/al80-lcd

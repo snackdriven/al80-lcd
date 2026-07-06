@@ -1,11 +1,12 @@
 # AL80 LCD
 
-> Reverse-engineering the YUNZII AL80 keyboard's LCD panel over raw HID, plus the tooling it produced. Headline result: a 12-hour clock on the LCD without reflashing (the stock ripple-lighting firmware stays in place). The still-image and GIF streaming protocols are decoded (display is 112×137, RGB565 big-endian), and both packet checksums are cracked (announce = CRC16-MODBUS; data blocks = a 16-bit accumulator seeded 121, +56/block), so a full custom-image transfer can be forged end-to-end. Device: VID 0x28E9 / PID 0x30AF; LCD is HID interface usagePage 0xFF60 / usage 0x61; screen ops are a 0x40 announce → 0x41 data → 0x42 finish sequence over 64-byte reports.
+> Reverse-engineering the YUNZII AL80 keyboard's LCD panel over raw HID, plus the tooling it produced. Headline result: a 12-hour clock on the LCD without reflashing (the stock ripple-lighting firmware stays in place), and live info-panel frames (Spotify now-playing) shown on-device. The still-image and GIF streaming protocols are fully decoded (display is 96×160, RGB565 big-endian, ROW-MAJOR), both packet checksums are cracked (announce = CRC16-MODBUS over the type triple; every packet also carries the `yne` 16-bit additive checksum at bytes[4,5]), and the display module's PK_* commit protocol is RE'd — `PK_ADD_PIC` (0x0C) is what actually displays a picture, gated by two settles and ACK-gated blocks. Device: VID 0x28E9 / PID 0x30AF; LCD is HID interface usagePage 0xFF60 / usage 0x61; screen ops are a 0x40 announce → 0x41 data → 0x42 finish sequence over 64-byte reports.
 
-Read the knowledge base first — it is self-contained and holds every confirmed fact, packet layout, and open question. The other files are runnable tooling and the raw research material behind it.
+Read the knowledge base first — it is self-contained and holds every confirmed fact, packet layout, and open question. The wiki reorganizes it into browsable sections. The other files are runnable tooling and the raw research material behind it.
 
 ## Primary reference
-- [AL80_KNOWLEDGE_BASE.md](AL80_KNOWLEDGE_BASE.md): the full write-up. Starts with a Quick Reference constants table and a Glossary, then device identity, display specs, command set, time-sync + 12hr hack, still-image and GIF stream protocols, tooling, VIA keymap, open questions, safety.
+- [AL80_KNOWLEDGE_BASE.md](AL80_KNOWLEDGE_BASE.md): the canonical full write-up. Starts with a Quick Reference constants table and a Glossary, then the dated session log (PK_* display commit, banding root cause, custom QMK), device identity, display specs, command set, time-sync + 12hr hack, still-image and GIF stream protocols, tooling, VIA keymap, open questions, safety.
+- [wiki/](wiki/): the same content as a browsable Material for MkDocs site (`cd wiki && uvx --with mkdocs-material mkdocs serve`). Sections: Protocol (framing, checksums, time/date, still images, GIF, PK_* display commit, chunking/pacing, full byte-map), Firmware, Hardware, How-to, Reference, History/Changelog.
 - [README.md](README.md): project overview, quick start, and a Links table (VIA, YUNZII software, LCD web app, QMK docs).
 
 ## Tooling (runnable)
@@ -18,7 +19,7 @@ Read the knowledge base first — it is self-contained and holds every confirmed
 - [research/README_captures.txt](research/README_captures.txt): what the capture archive contains.
 - [research/captures/hid_captures_annotated.txt](research/captures/hid_captures_annotated.txt): human-annotated HID packet dump.
 - [research/captures/device_descriptors.json](research/captures/device_descriptors.json): the 4 HID interfaces as enumerated.
-- [research/image_capture/](research/image_capture/): still-image test pattern + raw capture that confirmed 112×137 / RGB565 BE.
+- [research/image_capture/](research/image_capture/): still-image test pattern + raw capture (the source that, re-analyzed, corrected the panel to 96×160 / RGB565 BE — the original read dropped a 32-byte tail block).
 - [research/gif_capture/GIF_FINDINGS.md](research/gif_capture/GIF_FINDINGS.md): GIF upload protocol findings; raw GIF capture alongside it.
 - [research/site_assets/](research/site_assets/): YUNZII's own yunzii-game.com JS bundle (third-party; source for the packet-builder constants).
 
