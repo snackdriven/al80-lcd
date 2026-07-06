@@ -164,6 +164,69 @@ static void al80_palette_save(void) {
 #endif
 }
 
+/* ---- independent side-LED-bar color ----
+ * The side bar is RGB-matrix indices 76..78 (aw20216s driver 1). By default it
+ * follows the keys (keylight flag). When bar_independent is true, the RGB-matrix
+ * indicators hook overrides those three LEDs with bar_hsv every frame. The state
+ * is statically initialized (valid before the first render — no boot garbage),
+ * seeded from a SEPARATE EEPROM sub-block at post_init, edited live over raw-HID
+ * (0x47) and persisted (0x48). It lives at its own offset so it never disturbs
+ * the palette block (which keeps its own magic and layout). */
+static uint8_t bar_h           = 128;   /* cyan/teal on the 0..255 wheel */
+static uint8_t bar_s           = 255;
+static uint8_t bar_v           = 255;
+static bool    bar_independent = true;   /* default: bar shows its own color */
+
+#define AL80_BAR_MAGIC 0x5B              /* distinct from AL80_PALETTE_MAGIC 0x5A */
+/* Offset of the bar sub-block: right after the palette store (config.h reserves
+ * AL80_PALETTE_STORE_SIZE + AL80_BAR_STORE_SIZE bytes total). */
+#define AL80_BAR_STORE_OFFSET (sizeof(al80_palette_store_t))
+
+typedef struct {
+    uint8_t magic;
+    uint8_t h;
+    uint8_t s;
+    uint8_t v;
+    uint8_t independent;
+} al80_bar_store_t;
+
+static void al80_bar_load(void) {
+#if (EECONFIG_KB_DATA_SIZE) > 0
+    al80_bar_store_t store;
+    eeconfig_read_kb_datablock(&store, AL80_BAR_STORE_OFFSET, sizeof(store));
+    if (store.magic == AL80_BAR_MAGIC) {
+        bar_h           = store.h;
+        bar_s           = store.s;
+        bar_v           = store.v;
+        bar_independent = store.independent ? true : false;
+    }
+    /* else: keep the compiled defaults; leave flash untouched on a fresh board. */
+#endif
+}
+
+static void al80_bar_save(void) {
+#if (EECONFIG_KB_DATA_SIZE) > 0
+    al80_bar_store_t store = {AL80_BAR_MAGIC, bar_h, bar_s, bar_v, bar_independent ? 1 : 0};
+    eeconfig_update_kb_datablock(&store, AL80_BAR_STORE_OFFSET, sizeof(store));
+#endif
+}
+
+/* Override the three side-bar LEDs (76..78) with bar_hsv when independent. The
+ * RGB-matrix core calls this once per render with the current [led_min, led_max)
+ * slice, so bounds-check against the slice AND RGB_MATRIX_LED_COUNT. */
+bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
+    if (bar_independent) {
+        HSV hsv = {bar_h, bar_s, bar_v};
+        RGB rgb = hsv_to_rgb(hsv);
+        for (uint8_t i = 76; i <= 78; i++) {
+            if (i >= led_min && i < led_max && i < RGB_MATRIX_LED_COUNT) {
+                rgb_matrix_set_color(i, rgb.r, rgb.g, rgb.b);
+            }
+        }
+    }
+    return rgb_matrix_indicators_advanced_user(led_min, led_max);
+}
+
 /* ---- aw20216s LED map ----
  * {driver, R, G, B}. Macro naming reconciled with drivers/led/aw20216s.h,
  * which spells positions SW<row>_CS<col> (the params file used CS<col>_SW<row>;
@@ -285,6 +348,27 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
             data[6] = 0x55;   // ACK
             break;
 
+        /* ---- independent side-LED-bar protocol (mirrors the palette above) ---- */
+        case AP_BAR_GET: { // 0x46 -> [0x46, h, s, v, independent]
+            data[1] = bar_h;
+            data[2] = bar_s;
+            data[3] = bar_v;
+            data[4] = bar_independent ? 1 : 0;
+            break;
+        }
+        case AP_BAR_SET: { // 0x47: data[1]=h, data[2]=s, data[3]=v, data[4]=independent (RAM only)
+            bar_h           = data[1];
+            bar_s           = data[2];
+            bar_v           = data[3];
+            bar_independent = data[4] ? true : false;
+            data[6] = 0x55; // ACK (h/s/v/independent left echoed in place)
+            break;
+        }
+        case AP_BAR_SAVE: // 0x48: commit bar state to EEPROM
+            al80_bar_save();
+            data[6] = 0x55; // ACK
+            break;
+
         default:
             break;
     }
@@ -355,6 +439,9 @@ void keyboard_post_init_kb(void) {
     /* Seed the live palette mirror (EEPROM if a valid magic byte is stored,
        else the compiled default without touching flash). */
     al80_palette_load();
+
+    /* Seed the independent side-bar color from its own EEPROM sub-block. */
+    al80_bar_load();
 
     keyboard_post_init_user();
 }

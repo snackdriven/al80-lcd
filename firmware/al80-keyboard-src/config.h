@@ -54,10 +54,15 @@
  * in al80.c); the datablock size tracks it automatically. */
 #define AL80_PALETTE_LEN 3
 
-/* Dedicated KB datablock: 1 magic byte + PALETTE_LEN {h,s} pairs.
+/* Dedicated KB datablock. Two sub-blocks packed at fixed offsets so growing one
+ * never disturbs the other (each has its own validity magic):
+ *   [0 .. AL80_PALETTE_STORE_SIZE)  palette : 1 magic byte + PALETTE_LEN {h,s} pairs
+ *   [AL80_PALETTE_STORE_SIZE ..  )  side bar: 1 magic + h + s + v + independent (5 bytes)
  * QMK reserves EECONFIG_KB_DATABLOCK for us, so this never collides with
  * VIA/Vial dynamic-keymap or rgb_matrix eeconfig storage. */
-#define EECONFIG_KB_DATA_SIZE (1 + AL80_PALETTE_LEN * 2)
+#define AL80_PALETTE_STORE_SIZE (1 + AL80_PALETTE_LEN * 2)
+#define AL80_BAR_STORE_SIZE     5   /* magic + h + s + v + independent */
+#define EECONFIG_KB_DATA_SIZE   (AL80_PALETTE_STORE_SIZE + AL80_BAR_STORE_SIZE)
 
 /* raw-HID palette protocol opcodes (top-level, alongside LCD 0x40..0x42).
  * VIA command IDs top out at 0x13 (+0xFE/0xFF), so these reach the default
@@ -65,6 +70,13 @@
 #define AP_PALETTE_GET  0x43
 #define AP_PALETTE_SET  0x44
 #define AP_PALETTE_SAVE 0x45
+
+/* raw-HID side-LED-bar protocol opcodes (mirror the palette ones). The bar is
+ * RGB-matrix indices 76..78; when independent it renders bar_hsv instead of
+ * following the keys. GET echoes state; SET writes RAM + ACK 0x55; SAVE flushes. */
+#define AP_BAR_GET  0x46
+#define AP_BAR_SET  0x47
+#define AP_BAR_SAVE 0x48
 
 /* VialRGB effect id for the custom PALETTE_CYCLE effect. High range so it
  * cannot collide with the stock VIALRGB_EFFECT_* ids (which end < 0x40). */
