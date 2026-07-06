@@ -122,6 +122,7 @@ nav:
       - Quick reference: reference/quick-reference.md
       - Glossary: reference/glossary.md
       - Safety / do-not-touch: reference/safety.md
+  - Roadmap: roadmap.md
   - History / Changelog: history/changelog.md
   - Research notes: research-notes.md
 

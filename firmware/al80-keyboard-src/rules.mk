@@ -7,3 +7,4 @@ OPT_DEFS += -DAL80_LCD_ENABLE
 
 # Custom, user-recolorable RGB matrix effect (PALETTE_CYCLE)
 RGB_MATRIX_CUSTOM_KB = yes
+ANALOG_DRIVER_REQUIRED = yes
