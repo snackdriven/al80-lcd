@@ -1,5 +1,21 @@
 # Firmware
 
+## ⭐ Custom-QMK versions — KNOWN-GOOD: `AL80_CUSTOM_QMK_v19_rgbfx2.bin`
+
+**v19 is the most-working build so far (marked 2026-07-06).** Flash it if a newer one misbehaves — keys + Vial + clean LCD images + battery + 18 RGB effects, all confirmed. Also copied as `AL80_KNOWN-GOOD_v19.bin` for a quick grab.
+
+| Version | What it is | Status |
+|---|---|---|
+| v13 | colors correct; keys + RGB + Vial (LCD image still sheared) | ok |
+| v14 | RGB-pause → clean LCD images (+ host per-bank pacing) | ok |
+| v15–v17 | battery telemetry attempts (v17 = fixed charging+full) | ok |
+| v18 | 14 RGB matrix effects enabled | ok |
+| **v19** | **+ Digital Rain + Pixel Rain (18 effects) + battery + everything** | **⭐ KNOWN-GOOD** |
+| v20 | reactive/splash effects (drops tap-dance/combos/key-overrides — unused) | staged, untested |
+| v21 | separate LED-bar colour control | building |
+
+Flash via QMK Toolbox: hold **ESC + plug in USB** → stm32duino DFU → flash the `.bin`. Chip is **STM32F103x8** (56 KB app flash — v19/v20 near ~99%; 20 KB RAM). Source backups in `al80-keyboard-src/`.
+
 ## `YUNZII_AL80_RIPPLE.bin`
 
 The YUNZII AL80 **ripple-lighting firmware** — the exact build this whole project is built around. Everything in the repo assumes this firmware stays flashed; the HID-script approach exists precisely so the LCD can be driven **without** reflashing to stock QMK and losing the ripple effect.
