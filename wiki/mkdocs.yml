@@ -4,13 +4,15 @@ site_description: >-
   LCD panel — clock hack, still-image/GIF streaming, picture commit, custom QMK,
   and hardware notes.
 site_author: snackdriven
-# Set this to your GitHub Pages / Cloudflare Pages URL when you deploy.
-site_url: https://snackdriven.github.io/al80-lcd/
+# Hosted on the public al80-studio repo's Pages (al80-lcd stays private); served under /wiki/.
+site_url: https://snackdriven.github.io/al80-studio/wiki/
 
-# --- Repo links (edit if the repo name/owner changes) -----------------------
-repo_name: snackdriven/al80-lcd
-repo_url: https://github.com/snackdriven/al80-lcd
-edit_uri: edit/main/wiki/docs/
+# --- Repo links -------------------------------------------------------------
+# Point at the public host repo. Source markdown lives in the private al80-lcd/wiki/, so
+# per-page "edit" links are disabled (they'd 404).
+repo_name: snackdriven/al80-studio
+repo_url: https://github.com/snackdriven/al80-studio
+edit_uri: ""
 
 # --- Theme ------------------------------------------------------------------
 theme:
