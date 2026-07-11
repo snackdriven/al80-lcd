@@ -35,7 +35,7 @@ Panel: **96×160, RGB565 big-endian, row-major**, 30,720 bytes a frame. (The old
 
 ## Where it went
 
-The clock was just the start. Since then: still images and GIFs on the screen, and a custom **vial-qmk firmware** that keeps the LCD and adds Vial, per-key RGB (VialRGB), reactive effects, an independently-colored side LED bar, and a battery gauge. Spotify now-playing runs live on the panel. The flashing walkthrough and the full protocol are in the wiki.
+The clock was just the start. Since then: still images and GIFs on the screen, and a custom **vial-qmk firmware** that keeps the LCD and adds Vial, per-key RGB (VialRGB), reactive effects, an independently-colored side LED bar, and a battery gauge. An always-on host rotates Spotify now-playing, a weather card, and the clock on the panel and preempts to alert cards; browser-side lighting can react to system audio. The flashing walkthrough and the full protocol are in the wiki.
 
 ## Safety
 
