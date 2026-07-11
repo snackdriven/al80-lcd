@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 import {
@@ -75,7 +75,7 @@ test('vendored protocol ref matches live al80-studio protocol.js (when reachable
     t.skip('al80-studio/src/protocol.js not resolvable from this checkout — vendored ref stands in');
     return;
   }
-  const live = await import('file://' + found.replace(/\\/g, '/'));
+  const live = await import(pathToFileURL(found).href); // absolute + Windows/UNC-safe (was: 'file://'+path, threw on Windows)
   for (const { type } of Object.values(A4)) {
     assert.equal(hex(ref.buildView(type)[0]), hex(live.buildView(type)[0]), `buildView drift 0x${type.toString(16)}`);
   }
