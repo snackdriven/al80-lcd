@@ -78,9 +78,33 @@ both are in source) is resolved by *flashing and watching the screen*, not by pr
 | `v21_ledbar` | **independent side LED bar** colour control (0x46/47/48) |
 | `v23_encoder` | **per-layer rotary encoder** (hardcoded `encoder_update_user`) |
 | `v24_locks` / `v25_locks` | instant caps/num-lock LCD icons (`led_update_kb`) + eager debounce (`sym_eager_pk`) — shipped as **v1.3.0** |
+| `v28_keycodes` | **`process_record_kb` added** (this build shipped none): host-free view-switch keys `CUSTOM(22-24)`, hotkey `PANEL_*` `CUSTOM(25-29)` (`raw_hid_send` `0x4B`), and the per-key `0x49` live-LED handler + `g_live_rgb[]` + indicators paint + idle timeout. **Compiled, +452 B → 1,976 B free; NOT yet flashed** (morning at-desk verify). |
 
 The dev bins above fold into the semver releases: **v1.0.0** = keys+Vial+LCD+battery+18 effects,
-**v1.1.0** = reactive, **v1.2.0** = independent LED bar, **v1.3.0** = encoder + lock icons + eager debounce (latest).
+**v1.1.0** = reactive, **v1.2.0** = independent LED bar, **v1.3.0** = encoder + lock icons + eager debounce.
+`v28_keycodes` (the consolidated view-switch + hotkey + per-key build) is compiled and flash-measured but
+un-flashed, so it is not yet cut as a semver release — that happens after the on-device verify.
+
+## 🎧 Per-key audio-reactive RGB — HOST builders only (not yet a firmware bin)
+
+`research/al80-per-key-audio-reactive-SPARC.md` designs a live per-key VU/spectrum field over the
+82-LED matrix, streamed save-less from the browser over a new opcode `0x49` (`AP_LIVE_LEDS`) + an
+optional `0x4A` (`AP_LIVE_CTRL`, stop-now). The host half — al80-studio's `src/protocol.js`
+`buildLiveLeds`/`buildLiveFrame`/`buildLiveStop` — is device-free tested. The **firmware `0x49`
+handler is now built too** in `v28_keycodes` (`g_live_rgb[82*3]`, the `rgb_matrix_indicators_advanced_kb`
+paint loop with the `AL80_LIVE_MAX_VAL` cap, the `matrix_scan_kb` idle timeout) — compiled and
+flash-measured, not yet flashed. The optional `0x4A` stop opcode stays host-only (the firmware idle
+timeout alone restores the prior effect); `0x4A` still no-ops on-device, harmlessly.
+
+**Flash-budget question resolved from the linked `.elf`, not from a header comment:** `config.h`'s
+top comment says "STM32F103xB (128 KB)", but nothing in `rules.mk` or `keyboard.json` overrides
+`MCU_LDSCRIPT`, so the STM32F1xx default in `mcu_selection.mk` (`MCU_LDSCRIPT ?= STM32F103x8`)
+is what actually links — the **64 KB flash tier**, not 128 KB. After the stm32duino bootloader's
+8 KB carve-out, the usable `flash0` region is 56 KB (`__flash0_size__` = `0xE000`, confirmed by
+`nm` on `.build/yunzii_al80_vial.elf`); the last build (through v1.3.0/`v25_locks`) links
+54,916 B of that, leaving **≈2.37 KB free** (`__flash0_free__`→`__flash0_end__`). The ~200-400 B
+`0x49` handler fits, but margin is thin — see `AL80_KNOWLEDGE_BASE.md` §9b and
+`research/al80-buildout-discoveries.md` for the full derivation.
 
 !!! danger "Nothing here reflashes silently"
     All custom bins are experimental. Flashing replaces the ripple firmware. See

@@ -50,7 +50,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     ),
     [1] = LAYOUT(
         _______, KC_BRID, KC_BRIU, LGUI(KC_TAB), KC_MYCM, KC_MAIL, KC_WHOM, KC_MPRV, KC_MPLY, KC_MNXT, KC_MUTE, KC_VOLD, KC_VOLU, _______, KC_MUTE,
-        _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,
+        /* host-free LCD view keys (fresh-board defaults; existing users bind via Studio/Vial):
+           Fn+8 = picture, Fn+9 = home/clock, Fn+0 = gif */
+        _______, _______, _______, _______, _______, _______, _______, _______, AL80_KC_VIEW_PICTURE, AL80_KC_VIEW_HOME, AL80_KC_VIEW_GIF, _______, _______, _______, _______,
         _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, RGB_MOD, _______,
         _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          RGB_HUI,
         _______, _______, _______, _______, _______, _______, _______, _______, _______, _______, _______,          _______, RGB_VAI,

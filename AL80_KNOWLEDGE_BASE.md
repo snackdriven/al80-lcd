@@ -35,6 +35,63 @@ and future modification ideas.
 
 ---
 
+## 2026-07-10/11 — Panel auto-cycle (host/cycle.js + cycle-run.mjs): now-playing/weather/clock rotate on one host
+
+**Status: host code + device-free tests done, PR open (al80-studio). On-device rotation/banding check is at-desk work, not yet run.**
+
+The two single-purpose run-loops (`nowplaying-run.mjs`, `weather-run.mjs`) — each opening its own
+`Device`, each fine alone but mutually exclusive (single-opener) — are superseded by one always-on
+host, **`host/cycle-run.mjs`**, that owns ONE `Device` and rotates cached panel frames on a per-panel
+dwell timer: now-playing while music plays, weather + clock otherwise, preempting to an alert card
+when one arrives via the existing `127.0.0.1:7333` intake. Full design: `research/al80-lcd-panel-
+auto-cycle-SPARC.md`.
+
+**Architecture (3 layers, same split the daemon already proved with its stepped `run()`):**
+- **`host/panels/{nowplaying,weather,clock}.js`** — Phase 0 extraction. Each owns its OWN data poll
+  cadence (Spotify 5s, Open-Meteo 10min, clock never) fully decoupled from the display dwell; a
+  panel never touches the device. Formal `Panel` interface: `id, page, dwellMs, poll(), available(),
+  stale?(), wantsFocus?(), render?(), rgb?()`. `nowplaying-run.mjs` / `weather-run.mjs` still exist,
+  now as ~90-line single-panel debug launchers over the same panel modules (behavior-preserving).
+- **`host/cycle.js`** — the FSM. A pure(ish) `tick(now)` step function; ALL device I/O lives inside
+  it and its callees (`showPanel`/`pushCard`). Owns one invariant: `committed` = "our card is the
+  displayed picture slot." Exposes `jumpTo(panelId)` for the hotkey-panel-switch feature to build
+  against (takes effect next tick, ahead of focus-on-change, behind an active alert).
+- **`host/cycle-run.mjs`** — the launcher. Owns the one `Device`, builds panels from `CYCLE_PANELS`,
+  wires the reused `Scheduler` + `startLocalHook` (same `/alert` `/ack` `/status` intake the daemon
+  uses), runs each panel's poll on its own timer, drives `cycle.tick()` on `CYCLE_TICK_MS` (default
+  500ms).
+
+**Smart rules (Phase 2):** drop-when-idle (nowplaying `available()` false when nothing's playing, or
+paused ≥5min); focus-on-track-change (jump to nowplaying + fresh dwell on a new track, consume-once);
+stale-skip (weather >40min old is treated as unavailable — never shows an old temp); hold-on-clock
+(the FR3 fallback — if nothing else is available, park on the clock, zero host writes since it's the
+device's native RTC page). `CYCLE_MODE=roundrobin` disables all of the above for a fixed-rotation
+debug/demo mode.
+
+**Device-free test suite** (`host/test/cycle.test.mjs`, `host/test/recording-device.js`, `node --test`,
+no hardware): transition sequences (picture<->picture delete-before-add, home<->picture), ring
+net-zero over a full cycle, skip logic (unavailable panels never shown, clock is the always-available
+fallback), focus-on-change (mid-dwell jump + dwell reset + consume-once), alert interleave via
+`scheduler.alertCount` (preempt / hold / ack-resume-with-fresh-dwell), reopen recovery (a dropped
+write clears `committed`, reopens, repaints WITHOUT a blind `deletePicture`), and frame correctness
+(the pushed frame reassembles byte-exact through `RecordingDevice`'s `MockTransport`, matching the
+panel's own pure `render()`). All 7 green.
+
+**Divergences from the SPARC, discoveries, and the async-poll footgun found while building this:**
+logged in `research/al80-buildout-discoveries.md` (new — the append-only ground-truth log for this
+build). Notably: `tick()` itself absorbs the reopen-recovery catch (not a separate "driver" loop
+wrapping it) so the device-free tests can drive `tick(now)` directly per the SPARC's own §C2 test
+plan; and a genuine bug worth remembering — firing a panel's first `poll()` without awaiting it lets
+the very first `tick()` run before an async panel (nowplaying, even in mock mode) has any state,
+producing a one-tick wrong-panel flash on every cold start. Fixed by `await Promise.all(panels.map(p
+=> p.poll()))` before the tick loop starts.
+
+**Not yet done (needs the physical keyboard — morning/at-desk, not this build):** on-device rotation
++ banding check, unplug/replug recovery, autostart unification (`run-nowplaying.vbs` → `cycle-run.mjs`,
+a separate feature/PR), Phase 3 (RGB-per-panel, a Studio "Cycle" tab, retiring `daemon.js`).
+
+---
+
 ## 2026-07-02 (overnight) — picture-page banding root cause + loose ends closed
 
 > **SUPERSEDED (2026-07-04) — the banding root cause below is WRONG.** The "per-scanline 1-byte
@@ -516,6 +573,30 @@ intact.
 The clock homepage is **firmware-drawn with a fixed background**; the app only sets the time
 value. Every "color / theme / background / dynamic color" option in the vendor app targets the
 **RGB BACKLIGHT** (per-key lighting) — a different opcode family, out of scope for the LCD.
+
+### D11. Single-opener unified: `cycle-run.mjs` is the ONE always-on host (2026-07-10)
+
+Autostart unification (`research/al80-buildout-flow-and-overnight-plan.md` "Autostart unification")
+folds the always-on host down to **one process**: `al80-studio/host/cycle-run.mjs`. It rotates
+clock/weather/now-playing on a timer, hosts the local alert intake (127.0.0.1:7333, same as the old
+`daemon.js`), and preempts the rotation with alert cards via the shared `Scheduler`. It's built on
+`device.js` (the anti-banding-fixed native transport), same as `nowplaying-run.mjs` was.
+
+- `host/autostart/run-nowplaying.vbs` (the existing, un-recreated launcher — no new scheduled task
+  was registered) now runs `node cycle-run.mjs --live` instead of `nowplaying-run.mjs --live`.
+- `nowplaying-run.mjs` / `weather-run.mjs` survive unchanged as single-panel debug launchers —
+  equivalent in effect to `cycle-run.mjs --only=<panel>`, which is a real flag on the new file.
+- `daemon.js` / `transport-hid.js` are DEPRECATED (header notice added, not deleted): their
+  loop/reconnect/scheduler/alert-intake role folded into `cycle-run.mjs`; nothing launches them now.
+- **Divergence from the SPARC:** the overnight plan assumed `cycle-run.mjs` already existed as the
+  output of the auto-cycle spine (S1→S2→S3, a separate parallel workstream). It did not exist yet
+  in this worktree when Autostart unification (P5) ran, so this feature built a functional-but-
+  modest version of it (fixed-timer rotation, no hotkey `jumpTo` wiring, no picture-ring commit/
+  delete choreography per panel) sufficient to make "repoint the launcher at the superset host"
+  true and testable. See `research/al80-buildout-discoveries.md` for the full note — the fuller
+  auto-cycle behaviors (banding-safe per-panel choreography, hotkey-driven `jumpTo`) are still owed
+  by the auto-cycle feature track and should reconcile with / replace this file's rotation logic
+  rather than duplicate it.
 
 ### Related research (2026-07-02 session)
 
@@ -1125,6 +1206,109 @@ the bindings. Done in usevia.app via a Save-JSON → edit → Load-JSON workflow
 Export note: VIA's own **Save** button always works. Programmatic JS export is
 intermittent — `window.__editedJSON` holds the keymap string when the site allows JS exec
 (it was blocked one session, available the next), so don't rely on it.
+
+### 9a. Hotkey → LCD panel — HOST half built (`research/al80-hotkey-panel-switch-SPARC.md`)
+
+Keyboard→host signaling for a hotkey-driven panel switch. **Host half only** — al80-studio's
+`host/device.js` + `host/panel-request.js` — is built and device-free tested (`host/test/panel-request.test.mjs`).
+The firmware half (`process_record_kb`, the 5 `PANEL_*` keycodes, `al80_panel_req`) is a **separate,
+not-yet-built** piece of this SPARC; until it ships, nothing on the wire ever sends this opcode, so the
+host reader is inert but harmless.
+
+- **New keyboard→host opcode `0x4B`** (`src/protocol.js` `PANEL_REQ`, `PANEL_ID`, `PANEL_NAME_BY_ID`):
+  unsolicited `[0x4B, panelId, ...]`, disjoint from the `0x40-0x48` host→keyboard family and from the
+  `0x41` LCD echo the ACK matcher keys on (`device.js` matches `byte[0]===0x41`) — never a false-positive
+  ACK resolve.
+- **`device.js` `_onData`** re-emits it as a `'panelRequest'` event (Device already `extends EventEmitter`)
+  — additive, after the existing ACK-match block, confirmed by test not to cross-talk with an in-flight ACK wait.
+- **`host/panel-request.js`** `wirePanelRequests(dev, cycler, opts)` is the consumer: subscribes to
+  `panelRequest`, debounces/coalesces a burst to the LAST id (default 250ms — a held key or double-tap
+  resolves once, on the id you settled on), and routes to `cycler.jumpTo(name, now)` /
+  `cycler.togglePaused()` / `cycler.step(now)`. Built against the **interface**
+  `al80-lcd-panel-auto-cycle-SPARC.md` specifies for `cycle.js`'s cycler, not the real implementation —
+  that auto-cycle feature is itself unmerged as of this writing. `cycle-run.mjs` wires it in with one line
+  once both land: `wirePanelRequests(dev, cyc)` after `dev.open()`.
+- Unknown/unmapped ids are dropped (`onDrop` callback, never throw) — a stray byte on the wire can't crash
+  the always-on host.
+
+### 9b. Per-key audio-reactive RGB — HOST builders built (`research/al80-per-key-audio-reactive-SPARC.md`)
+
+Live per-key VU/spectrum field over the 82-LED aw20216s matrix, streamed save-less from the browser.
+**Host builders only** — al80-studio's `src/protocol.js` `buildLiveLeds`/`buildLiveFrame`/`buildLiveStop`
+— is built and device-free tested (`test/protocol.test.mjs`). The firmware half (the `0x49` handler,
+`g_live_rgb[]`, the `rgb_matrix_indicators_advanced_kb` paint loop, the `matrix_scan_kb` idle timeout) is a
+**separate, not-yet-built** piece of this SPARC; until it ships, `0x49` no-ops on-device (falls through
+via.c's default case), so sending it is harmless but does nothing yet.
+
+- **New opcode `0x49 AP_LIVE_LEDS`** (`src/protocol.js` `AP_LIVE.LEDS`), next free after the side-bar
+  family `0x43-0x48` — host→keyboard, RAM-only, no SAVE variant by design (NFR2: zero EEPROM writes on
+  the audio path). Wire: `[0x49, offset, count, R,G,B x count(<=20)]`, count max = `floor((64-3)/3) = 20`.
+  `buildLiveFrame(rgb246)` chunks a full 82-LED field into exactly 5 reports (offsets 0/20/40/60/80,
+  counts 20/20/20/20/2) — matches the SPARC's A.1 framing byte-for-byte.
+- **`buildLiveStop()`** emits `[0x4A, 0]` (`AP_LIVE.CTRL` sub0 stop-now) — the SPARC's optional polish
+  opcode; MVP firmware doesn't need it (idle timeout alone restores the prior effect) but the host builder
+  exists so the "Stop" button in Studio can request an immediate stop instead of waiting out `AL80_LIVE_IDLE_MS`.
+- **No wire-side LED remap.** `rgb_matrix_set_color(index,…)` takes the logical rgb-matrix index; the
+  aw20216s driver's `g_aw20216s_leds[]` (already in `al80.c`, see §7/14) resolves the electrical scramble
+  internally. The host sends plain logical order from `keyboard.json`'s `rgb_matrix.layout` — no per-key
+  walk required unless the on-device `CYCLE_LEFT_RIGHT` sweep check (SPARC R.1) comes back sheared.
+- **MCU flash-cap question RESOLVED from ground truth** (linker script + the actual linked `.elf`, not
+  from `config.h`'s header comment): `keyboard.json` sets `"board": "STM32_F103_STM32DUINO"` and neither
+  `rules.mk` nor `keyboard.json` overrides `MCU_LDSCRIPT`, so `platforms/chibios/mcu_selection.mk`'s
+  default for the STM32F1xx family (`MCU_LDSCRIPT ?= STM32F103x8`) applies — **the linker treats this
+  as the 64 KB (x8) flash tier, not the 128 KB xB tier config.h:4's comment claims.** The stm32duino
+  bootloader carves out the first 8 KB (`org = 0x08002000, len = f103_flash_size - 0x2000` in
+  `stm32duino_bootloader_common.ld`), leaving a **56 KB `flash0` region** (`__flash0_size__` = `0xE000`
+  = 57,344 B, confirmed by `nm` on the last built `.build/yunzii_al80_vial.elf`). That build's linked
+  `text+data` = 53,552 + 1,364 = 54,916 B, so **`__flash0_free__` to `__flash0_end__` = 0x0800f684 to
+  0x08010000 = 0x97C = 2,428 bytes (≈2.37 KB) free** — closely matching the roadmap's "~2.9 KB free
+  after v20" estimate (small drift expected as code has moved since). **Verdict: config.h's "STM32F103xB
+  (128 KB)" is a stale/aspirational header comment, not what the build actually links against — the real
+  budget is the tight 64 KB-class tier.** The ~200-400 B handler (SPARC R.4) fits, but headroom is thin;
+  see `research/al80-buildout-discoveries.md` for the full derivation.
+
+### 9c. Consolidated firmware build — the three FIRMWARE halves now exist (compiled, not yet flashed)
+
+The firmware halves §9a/§9b flagged as "separate, not-yet-built" are now built, in ONE consolidated
+custom-QMK build (`firmware/al80-keyboard-src/`, artifact `firmware/AL80_CUSTOM_QMK_v28_keycodes.bin`).
+This build compiles clean and fits flash; it is **NOT yet flashed** (on-device verify is a morning
+at-desk step — see `research/al80-lcd-morning-playbook.md`). SPARCs:
+`al80-firmware-view-switch-keycodes-SPARC.md` (owns `process_record`) + the hotkey + per-key SPARCs.
+
+- **`process_record_kb` added from scratch** — this build shipped no `process_record` of any kind, so
+  the stock view-switch customs did nothing on it. Now `al80.c` has a keyboard-level handler switching
+  on 8 custom keycodes (enum in `al80.h`, values pinned to VIA `CUSTOM(22-29)`):
+  - `AL80_KC_VIEW_HOME/PICTURE/GIF` = `CUSTOM(22-24)` = `0x7E16/17/18`. Press → set a deferred
+    `view_request` byte (0x0B/0x0D/0x0F). `housekeeping_task_kb` flushes it via `al80_screen_view` when
+    `!g_screen_busy` — same deferral discipline as `locks_dirty`, so the 7-byte announce never interleaves
+    with an image passthrough or the RGB SPI stream.
+  - `AL80_KC_PANEL_NOWPLAYING/WEATHER/CLOCK/CYCLE_TOGGLE/PANEL_NEXT` = `CUSTOM(25-29)` = `0x7E19-1D`.
+    Press → (optionally) set `view_request` for instant local feedback AND call `al80_panel_req(id)`, which
+    `raw_hid_send`s the unsolicited `[0x4B, id]` report the §9a host reader consumes. ids: 0x00 np,
+    0x01 wx, 0x02 clock, 0xF0 toggle, 0xF1 next.
+  - All cases `return false` (consume) so no keystroke leaks to the OS; press-edge only (held custom
+    keycodes aren't re-invoked → one fire per press). `default:` falls through to `process_record_user`.
+- **`al80_screen_view` / `al80_screen_send_view`** — the host-free USART3 view switch. A view announce
+  carries ZERO data, so it's a **7-byte** packet (`A5 5A type 00 00 crcHi crcLo`), one byte shorter than
+  `al80_screen_send_u8`'s 8-byte status packet. Bytes are identical to `protocol.js buildView(type)`'s
+  payload — proven by the wire-bytes unit test (`firmware/test/firmware-wire.test.mjs`) asserting
+  `al80_screen_send_view(type) == buildView(type)[0].slice(7,14)` against the live al80-studio protocol.js,
+  and against the SPARC A4 table: HOME `A5 5A 0B 00 00 02 00`, PICTURE `A5 5A 0D 00 00 03 E0`,
+  GIF `A5 5A 0F 00 00 C3 41`. CRC via `al80_crc16` == protocol.js `ga`.
+- **`0x49 AP_LIVE_LEDS` handler** — the firmware half of §9b. Case in `raw_hid_receive_kb`: memcpy each
+  `[0x49, off, cnt, rgb…]` chunk into `g_live_rgb[82*3]` (RAM, no EEPROM), set `g_live_active` + timestamp,
+  ACK 0x55 (0x0F if `off+cnt > 82`). `rgb_matrix_indicators_advanced_kb` paints `g_live_rgb` across the
+  whole slice when active (live owns the board incl. the side bar; the independent-bar override only runs
+  when live is inactive), with the `AL80_LIVE_MAX_VAL` (default 160, ~63%) firmware brightness cap.
+  `matrix_scan_kb` clears `g_live_active` after `AL80_LIVE_IDLE_MS` (500 ms) so the prior effect resumes —
+  we never touch `rgb_matrix_config`, so the restore is instant and EEPROM-free.
+- **Fresh-board keymap defaults** — `keymaps/vial/keymap.c` layer 1 gets Fn+8=PICTURE, Fn+9=HOME,
+  Fn+0=GIF. ⚠ These apply on a FRESH EEPROM only; VIA/Vial's emulated EEPROM survives a reflash, so a
+  user already on custom fw must bind the keys via Studio (`PRESETS['LCD view']` already maps them to
+  `CUSTOM(22-24)`, zero code change) — we deliberately do NOT force-seed via the dynamic-keymap fixups.
+- **Flash:** built `55,368 B` vs baseline `54,916 B` → **+452 B for all three features**, against the
+  56 KB (`__flash0_size__` = 0xE000 = 57,344 B) cap → **1,976 B free.** Fits one build; measured on the
+  linked ELF, not estimated. (Full derivation of the cap in §9b + `al80-buildout-discoveries.md`.)
 
 ---
 

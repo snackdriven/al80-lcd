@@ -78,6 +78,25 @@
 #define AP_BAR_SET  0x47
 #define AP_BAR_SAVE 0x48
 
+/* raw-HID per-key live LED stream (host -> keyboard). Next free opcode after the bar range.
+ * Report: [0x49, offset, count, R,G,B x count(<=20), spare]. RAM-only, no EEPROM. The handler
+ * memcpys each chunk into g_live_rgb and the indicators hook repaints it every render. */
+#define AP_LIVE_LEDS 0x49
+
+/* keyboard -> host panel-request signal (UNSOLICITED raw_hid_send, not a reply). Report:
+ * [0x4B, panelId, 0...]. 0x49/0x4A/0x4B were the free opcodes above the host->kb customs
+ * (0x40-0x48); 0x4B can never false-resolve an in-flight image ACK (matcher keys on byte0=0x41). */
+#define AP_PANEL_REQ 0x4B
+
+/* Live-LED stream idle fallback + brightness cap (defense in depth; the host also caps). When
+ * frames stop for AL80_LIVE_IDLE_MS the prior RGB effect resumes (no re-selection, no EEPROM). */
+#ifndef AL80_LIVE_IDLE_MS
+#    define AL80_LIVE_IDLE_MS 500
+#endif
+#ifndef AL80_LIVE_MAX_VAL
+#    define AL80_LIVE_MAX_VAL 160   /* ~63% cap (NFR1). Set 255 to disable the firmware cap. */
+#endif
+
 /* VialRGB effect id for the custom PALETTE_CYCLE effect. High range so it
  * cannot collide with the stock VIALRGB_EFFECT_* ids (which end < 0x40). */
 #define AL80_VIALRGB_PALETTE_CYCLE_ID 0x0100
