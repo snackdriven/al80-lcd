@@ -39,11 +39,15 @@ export const AP_LIVE_LEDS = 0x49;
 export const ACK_OK = 0x55;
 export const ACK_RANGE = 0x0f;
 
-/** Apply one 0x49 report `data` (Uint8Array/[]) into `buf` (Uint8Array length 246). Returns ack. */
-export function applyLiveChunk(buf, data) {
+export const RAW_EPSIZE = 64; // fixed HID report size — the C `length` is always this for 0x49
+
+/** Apply one 0x49 report `data` (Uint8Array/[]) into `buf` (Uint8Array length 246). Returns ack.
+ * `length` mirrors the C handler's report length: cnt is bounded by BOTH the destination (off+cnt<=82)
+ * and the source ((length-3)/3 == 20), so a cnt>20 can't read past the 64-byte report. */
+export function applyLiveChunk(buf, data, length = RAW_EPSIZE) {
   const off = data[1] & 0xff;
   const cnt = data[2] & 0xff;
-  if (off + cnt <= RGB_MATRIX_LED_COUNT) {
+  if (off + cnt <= RGB_MATRIX_LED_COUNT && cnt <= (length - 3) / 3) {
     for (let i = 0; i < cnt * 3; i++) buf[off * 3 + i] = data[3 + i] & 0xff;
     return ACK_OK;
   }

@@ -527,7 +527,9 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
          * frames stop). count max = (RAW_EPSIZE-3)/3 = 20; 82 LEDs => 5 reports. No EEPROM. */
         case AP_LIVE_LEDS: { // 0x49
             uint8_t off = data[1], cnt = data[2];
-            if ((uint16_t)off + cnt <= RGB_MATRIX_LED_COUNT) {
+            /* bound BOTH the destination (off+cnt <= 82) AND the source read from the report:
+             * cnt <= (length-3)/3 == 20, so a malformed cnt can't memcpy past the 64-byte report. */
+            if ((uint16_t)off + cnt <= RGB_MATRIX_LED_COUNT && cnt <= (uint8_t)((length - 3) / 3)) {
                 memcpy(&g_live_rgb[off * 3], &data[3], (uint16_t)cnt * 3);
                 g_live_active = true;
                 g_live_last   = timer_read32();
