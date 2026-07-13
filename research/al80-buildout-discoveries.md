@@ -288,3 +288,42 @@ firmware/test/firmware-wire.test.mjs` -> 9/9 green.
   with `cycle-run` up; the per-key `CYCLE_LEFT_RIGHT` LED-order sweep (per-key SPARC R.1 ⚠VERIFY) then a
   static test pattern BEFORE any audio; unsolicited `raw_hid_send` vs the image ACK stream. See
   `research/al80-lcd-morning-playbook.md`.
+
+## Global music-reactive lighting - shipped (al80-studio, 2026-07-11)
+
+Built per `research/al80-music-reactive-lighting-SPARC.md`. Branch `feat/music-reactive-lighting`
+(draft PR on `snackdriven/al80-studio`). Device-free build: no board opened, no sends, no flash.
+
+- **The whole feature = existing FX loop + audio color source + a firmware-aware save-less picker.**
+  No firmware change, as the SPARC predicted. Reuses `startFx`/`stopFx`/`sendFrame`/`lightingFxCtl`
+  wholesale; the only new runtime bits are the audio capture, the pure mapper, and the fw detect.
+- **One protocol addition: `buildLightBrightnessLive(v)` = `buildLightSet(LIGHT.BRIGHTNESS,[v])`** -
+  the BARE noeeprom set (single `07 03 01 <val>` report), NOT the `buildLightBrightness` wrapper that
+  appends a `09` save. This is the whole point on stock: brightness reactivity save-less. A test
+  asserts the live builder is a lone `Uint8Array` with no `0x09` byte and contrasts it against the
+  wrapper's `[set, save]` pair, so the distinction can't silently regress.
+- **New pure module `src/music.js`** (DOM-free, HID-free, node-testable): `mapAudioToHSV` (P.2 math -
+  bands->hue, RMS->brightness, spectral-flux onset, host-side cap + value/hue slew), `newMapState`,
+  `pickSaveLessCommand` (custom -> 1 `07 41` report; stock -> `07 03 04` + `07 03 01`, neither with a
+  save), `detectFirmware(transact)` (0x46 side-bar probe; reply -> custom, no reply/throw -> stock).
+- **UI:** a "Music" card in the Lighting tab (Breathe default / Pulse / Follow-hue, brightness-cap
+  slider default 60%, Start/Stop). `getDisplayMedia({video,audio,systemAudio:'include'})` is gated
+  behind the Start gesture; video track is stopped immediately, analyser never connects to
+  destination. `startMusic` calls `stopFx` first and chains `stopMusic` into `lightingFxCtl.stop`, so
+  tab-away (`ui.js:445/467`), disconnect (`ui.js:161`), Stop, and track-`ended` all tear the stream +
+  AudioContext down and cancel the rAF loop.
+
+### Divergences from the SPARC (small)
+- **Stock base-effect pin uses effect id 1, not `SOLID_COLOR_EFFECT` (2).** The SPARC's A.4 sketch pins
+  custom with the VialRGB ordinal `SOLID=2` (correct) but the two enums differ: stock QMK RGB-matrix
+  `RGB_MATRIX_SOLID_COLOR` is id 1, the VialRGB `SOLID` ordinal is 2. Implemented `STOCK_SOLID_EFFECT=1`
+  for the stock `buildLightEffect(...)` pin; custom still pins with 2. (SPARC A.4 already wrote
+  `buildLightEffect(1)` for stock in its pin line - so this matches the SPARC's stock value, just
+  reconciles it against the shared `SOLID_COLOR_EFFECT` const.)
+- **Node/headless `setRGBLive` path (S.2 FR9 / A.5) not built** - SPARC Phase 4, lowest priority, and
+  the task scoped the browser feature only. `host/device.js` still only has the EEPROM-writing `setRGB`.
+- **Tests use `node --test` (node:test)** rather than the repo's older custom `ok()`-counter runner, so
+  the new file is wired as `node --test test/music.test.mjs` in the root `package.json` "test" script
+  (runs green there; the pre-existing `host/test/device.dryrun` step still needs an installed `node-hid`,
+  unrelated to this feature). 15 tests: the builder distinction, mapper fixtures (floor/band-hue/cap/
+  slew/onset/hue-wrap), `pickSaveLessCommand` per fw, `detectFirmware` branch selection.
