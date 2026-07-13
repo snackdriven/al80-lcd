@@ -14,3 +14,8 @@ venv/
 # os
 Thumbs.db
 .DS_Store
+
+# local-only research scratch
+# nested clone of a different keyboard's repo (MK856), reference only
+research/mk856-src/
+research/al80-music-discoveries-tmp.md
