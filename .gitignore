@@ -14,3 +14,16 @@ venv/
 # os
 Thumbs.db
 .DS_Store
+
+# local-only research scratch
+# nested clone of a different keyboard's repo (MK856), reference only
+research/mk856-src/
+research/al80-music-discoveries-tmp.md
+
+# local experimental firmware builds — only milestone .bins get committed
+# by hand (v19 known-good, v28 keycodes, v1.3.0). Ignore the rest.
+firmware/AL80_CUSTOM_QMK_v23_encoder.bin
+firmware/AL80_CUSTOM_QMK_v24_locks.bin
+firmware/AL80_CUSTOM_QMK_v25_locks.bin
+firmware/AL80_CUSTOM_QMK_v26_mutefix.bin
+firmware/AL80_CUSTOM_QMK_v27_eager.bin

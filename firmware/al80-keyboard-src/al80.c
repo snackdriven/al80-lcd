@@ -84,6 +84,40 @@ static void al80_screen_send_u8(uint8_t type, uint8_t val) {
     sdWrite(&SD3, pkt, sizeof(pkt));
 }
 
+/* One PK_GO view announce (home 0x0B / picture 0x0D / gif 0x0F) to the module. Unlike a status
+ * packet, a view announce carries ZERO data: len byte 0x00, so the packet is 7 bytes (no trailing
+ * value), not 8. These bytes are identical to protocol.js buildView(type) -- the same wire the host
+ * relays via raw_hid_receive_kb (which sdWrites only data[7..]). CRC16-MODBUS over [type,0,0]. */
+static void al80_screen_send_view(uint8_t type) {
+    uint8_t  hdr[3] = { type, 0x00, 0x00 };
+    uint16_t crc    = al80_crc16(hdr, 3);
+    uint8_t  pkt[7] = { 0xA5, 0x5A, type, 0x00, 0x00, (uint8_t)(crc >> 8), (uint8_t)crc };
+    sdWrite(&SD3, pkt, sizeof(pkt));
+}
+
+/* Switch the on-device LCD view over USART3, host-free. Wrapped in the same g_screen_busy
+ * discipline as al80_battery_push so the announce can't interleave with the RGB SPI stream.
+ * Called only from housekeeping_task_kb (deferred via view_request) when !g_screen_busy. */
+static void al80_screen_view(uint8_t type) {
+    g_screen_busy = true;
+    al80_screen_send_view(type);
+    wait_us(500);
+    g_screen_busy = false;
+    screen_busy_wd = 0;
+}
+
+/* Keyboard -> host panel-switch signal: an UNSOLICITED raw-HID report [0x4B, panelId, 0...] on the
+ * interface the host already reads (device.js _onData). A 0x4B first byte routes to cycler.jumpTo.
+ * Mirrors al80_screen_send_u8's shape but on the USB raw-HID path, not USART3. Fired directly from
+ * the key handler (raw_hid_send is not the USART3 subsystem, so it has no byte-shear concern; if it
+ * ever collides with an in-flight image ACK stream on-device, gate it on !g_screen_busy). */
+static void al80_panel_req(uint8_t id) {
+    uint8_t buf[RAW_EPSIZE] = {0};
+    buf[0] = AP_PANEL_REQ;
+    buf[1] = id;
+    raw_hid_send(buf, RAW_EPSIZE);
+}
+
 /* Read the battery and push PK_BATT_QUANTITY (%) + PK_BATT_STATUS to the module. Caller must
  * ensure no image transfer is in flight (checks g_screen_busy) so the bytes don't interleave. */
 static void al80_battery_push(void) {
@@ -133,6 +167,51 @@ static void al80_homepage_init(void) {
  * locks_dirty. */
 static volatile bool locks_dirty = false;
 static uint8_t       last_locks  = 0xFF;   /* caps<<1|num; 0xFF = unknown -> first report syncs */
+
+/* Deferred host-free view-switch request. process_record_kb sets this to a PK_GO view type
+ * (0x0B home / 0x0D picture / 0x0F gif) on a view-key press; housekeeping_task_kb flushes it via
+ * al80_screen_view when !g_screen_busy, so the 7-byte announce never interleaves with an in-flight
+ * image passthrough or the RGB SPI stream (same deferral discipline as locks_dirty). Multiple
+ * presses coalesce to the last. 0 = nothing pending. */
+static volatile uint8_t view_request = 0;
+
+/* ---- custom keycode handler (NEW: this build shipped no process_record of any kind) ----
+ * View keys switch the LCD on-device via the deferred view_request; PANEL_* keys additionally
+ * signal the host cycler over raw-HID 0x4B. Press-edge only -- QMK does not re-invoke held custom
+ * keycodes, so a held key fires exactly once (no repeat storm). Every case returns false to consume
+ * the keycode: no HID keystroke reaches the OS/focused app. The handler sets one byte (view_request)
+ * and/or fires raw_hid_send; it never does a blocking USART3 sdWrite/wait_us in the key path (that
+ * was the v24 typing-stall regression -- USART3 work is deferred to housekeeping_task_kb). */
+bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
+    switch (keycode) {
+        case AL80_KC_VIEW_HOME:
+            if (record->event.pressed) view_request = 0x0B;
+            return false;
+        case AL80_KC_VIEW_PICTURE:
+            if (record->event.pressed) view_request = 0x0D;   /* PK_TOGGLE_PIC advances the ring */
+            return false;
+        case AL80_KC_VIEW_GIF:
+            if (record->event.pressed) view_request = 0x0F;
+            return false;
+        case AL80_KC_PANEL_NOWPLAYING:
+            if (record->event.pressed) { view_request = 0x0D; al80_panel_req(0x00); }
+            return false;
+        case AL80_KC_PANEL_WEATHER:
+            if (record->event.pressed) { view_request = 0x0D; al80_panel_req(0x01); }
+            return false;
+        case AL80_KC_PANEL_CLOCK:
+            if (record->event.pressed) { view_request = 0x0B; al80_panel_req(0x02); }
+            return false;
+        case AL80_KC_CYCLE_TOGGLE:
+            if (record->event.pressed) al80_panel_req(0xF0);  /* pause/resume rotation, no local view */
+            return false;
+        case AL80_KC_PANEL_NEXT:
+            if (record->event.pressed) al80_panel_req(0xF1);  /* advance one panel, no local view */
+            return false;
+        default:
+            return process_record_user(keycode, record);
+    }
+}
 
 /* Push caps + num lock to the module. Main-loop context (like al80_battery_push), so the two 500us
  * settles are fine. Bit map matches al80_homepage_init: caps = leds bit1, num = leds bit0. */
@@ -262,11 +341,33 @@ static void al80_bar_save(void) {
 #endif
 }
 
-/* Override the three side-bar LEDs (76..78) with bar_hsv when independent. The
- * RGB-matrix core calls this once per render with the current [led_min, led_max)
- * slice, so bounds-check against the slice AND RGB_MATRIX_LED_COUNT. */
+/* ---- per-key live LED stream (host audio-reactive) ----
+ * The host streams the whole 82-LED field save-less over raw-HID 0x49 in <=20-LED chunks. Each
+ * chunk memcpys into g_live_rgb; the indicators hook below repaints the buffer every render. No
+ * double-buffer -- a torn frame (chunks from frame N and N-1) lasts <=1 render (~16 ms), invisible
+ * for VU motion. Zero EEPROM writes. When frames stop, matrix_scan_kb clears g_live_active after
+ * AL80_LIVE_IDLE_MS and the user's prior effect resumes untouched (we only override in the hook;
+ * rgb_matrix_config is never modified). Buffer is .bss (zero-init), ~246 B of the 20 KB RAM. */
+static uint8_t           g_live_rgb[RGB_MATRIX_LED_COUNT * 3];
+static volatile bool     g_live_active = false;
+static volatile uint32_t g_live_last   = 0;
+
+/* Per-render override. When a live audio field is streaming, paint g_live_rgb across the whole
+ * slice (live owns the board, side bar included). Otherwise fall back to the independent side-bar
+ * override (76..78). The RGB-matrix core calls this once per render with [led_min, led_max), so
+ * bounds-check against the slice AND RGB_MATRIX_LED_COUNT. */
 bool rgb_matrix_indicators_advanced_kb(uint8_t led_min, uint8_t led_max) {
-    if (bar_independent) {
+    if (g_live_active) {
+        for (uint8_t i = led_min; i < led_max && i < RGB_MATRIX_LED_COUNT; i++) {
+            uint8_t r = g_live_rgb[i * 3], g = g_live_rgb[i * 3 + 1], b = g_live_rgb[i * 3 + 2];
+#if AL80_LIVE_MAX_VAL < 255
+            r = (uint8_t)((uint16_t)r * AL80_LIVE_MAX_VAL >> 8);
+            g = (uint8_t)((uint16_t)g * AL80_LIVE_MAX_VAL >> 8);
+            b = (uint8_t)((uint16_t)b * AL80_LIVE_MAX_VAL >> 8);
+#endif
+            rgb_matrix_set_color(i, r, g, b);
+        }
+    } else if (bar_independent) {
         HSV hsv = {bar_h, bar_s, bar_v};
         RGB rgb = hsv_to_rgb(hsv);
         for (uint8_t i = 76; i <= 78; i++) {
@@ -420,6 +521,25 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
             data[6] = 0x55; // ACK
             break;
 
+        /* ---- per-key live LED stream (host audio-reactive), RAM only ----
+         * [0x49, offset, count, r,g,b x count]. Mirrors the 0x47 side-bar SET: memcpy the chunk
+         * into g_live_rgb, mark the stream active + timestamp it (matrix_scan_kb idles it out when
+         * frames stop). count max = (RAW_EPSIZE-3)/3 = 20; 82 LEDs => 5 reports. No EEPROM. */
+        case AP_LIVE_LEDS: { // 0x49
+            uint8_t off = data[1], cnt = data[2];
+            /* bound BOTH the destination (off+cnt <= 82) AND the source read from the report:
+             * cnt <= (length-3)/3 == 20, so a malformed cnt can't memcpy past the 64-byte report. */
+            if ((uint16_t)off + cnt <= RGB_MATRIX_LED_COUNT && cnt <= (uint8_t)((length - 3) / 3)) {
+                memcpy(&g_live_rgb[off * 3], &data[3], (uint16_t)cnt * 3);
+                g_live_active = true;
+                g_live_last   = timer_read32();
+                data[6] = 0x55; // ACK in place (echoed by via.c raw_hid_send)
+            } else {
+                data[6] = 0x0F; // out of range
+            }
+            break;
+        }
+
         default:
             break;
     }
@@ -429,6 +549,8 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
 /* Watchdog: resume RGB if an LCD transfer stalls (0x42 lost), so lighting can't freeze. */
 void matrix_scan_kb(void) {
     if (screen_busy_wd && --screen_busy_wd == 0) g_screen_busy = false;
+    /* Live-LED idle fallback: if the host stops streaming, drop back to the prior RGB effect. */
+    if (g_live_active && timer_elapsed32(g_live_last) > AL80_LIVE_IDLE_MS) g_live_active = false;
     matrix_scan_user();
 }
 
@@ -439,6 +561,11 @@ void housekeeping_task_kb(void) {
     static uint32_t init_timer = 0;
     static uint8_t  boot_inits = 0;   /* run the homepage init a few times over the first ~6s */
     if (!g_screen_busy) {
+        if (view_request) {                /* a host-free view key was pressed; flush the announce */
+            uint8_t v    = view_request;
+            view_request = 0;
+            al80_screen_view(v);           /* 7-byte PK_GO home/picture/gif over USART3 */
+        }
         if (locks_dirty) {                 /* a Caps/Num toggle landed mid-transfer; flush it now */
             locks_dirty = false;
             al80_locks_push();
