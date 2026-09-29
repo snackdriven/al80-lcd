@@ -21,7 +21,9 @@ research/mk856-src/
 research/al80-music-discoveries-tmp.md
 
 # local experimental firmware builds — only milestone .bins get committed
-# by hand (v19 known-good, v28 keycodes, v1.3.0). Ignore the rest.
+# by hand (v19 known-good, v28 keycodes, v29 panel-hostonly, v1.3.0). Ignore
+# the rest. NOTE: builds happen in WSL (~/al80-lcd), so these exist there even
+# when the Windows clone looks empty — check both before assuming a bin is lost.
 firmware/AL80_CUSTOM_QMK_v23_encoder.bin
 firmware/AL80_CUSTOM_QMK_v24_locks.bin
 firmware/AL80_CUSTOM_QMK_v25_locks.bin

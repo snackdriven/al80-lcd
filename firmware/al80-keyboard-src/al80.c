@@ -193,11 +193,17 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
         case AL80_KC_VIEW_GIF:
             if (record->event.pressed) view_request = 0x0F;
             return false;
+        /* Host-only, NO local view (was view_request=0x0D). 0x0D is PK_TOGGLE_PIC — it ADVANCES the
+         * picture ring (KB R3), not "show picture page". The host's PK_ADD_PIC already commits AND
+         * displays the panel card and brings the LCD to the picture view on its own, so a local
+         * advance only (a) desyncs the host's delete-before-add ring hygiene and (b) flashes an old
+         * slot before the card lands. Trade-off (per hotkey-SPARC FR2/§77): we lose the instant-view
+         * gap-filler + no-host fallback; the card now appears when the host repaints (~1-1.5s). */
         case AL80_KC_PANEL_NOWPLAYING:
-            if (record->event.pressed) { view_request = 0x0D; al80_panel_req(0x00); }
+            if (record->event.pressed) al80_panel_req(0x00);
             return false;
         case AL80_KC_PANEL_WEATHER:
-            if (record->event.pressed) { view_request = 0x0D; al80_panel_req(0x01); }
+            if (record->event.pressed) al80_panel_req(0x01);
             return false;
         case AL80_KC_PANEL_CLOCK:
             if (record->event.pressed) { view_request = 0x0B; al80_panel_req(0x02); }
