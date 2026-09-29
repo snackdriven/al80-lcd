@@ -638,6 +638,19 @@ void housekeeping_task_kb(void) {
 }
 
 void keyboard_pre_init_kb(void) {
+#if defined(AL80_WIRELESS_ENABLE)
+    /* FIRST, before anything else -- this is what stock does.
+     *
+     * board.h puts PA9 in alternate-function push-pull at halInit, so until
+     * USART1 is actually enabled the pin is driven by a disabled peripheral:
+     * not a guaranteed idle-high UART line. Stock closes that window
+     * immediately (serial_init(460800) is the first call in its board init, at
+     * 0x08009FBE, ahead of the B7 pulse and the LCD). Our old ordering left it
+     * floating through the B7 reset pulse, matrix init, AW20216S init and the
+     * whole LCD bring-up -- hundreds of milliseconds that the module can read
+     * as a sustained break on its RX. */
+    al80_wireless_init();
+#endif
     /* Display-module reset pulse. B7 is shared: the aw20216s driver later
        holds it HIGH to enable the LED matrix (AW20216S_EN_PIN B7, confirmed
        on-device: B7 low = no keys). But ripple's screen-init first drives B7
@@ -702,11 +715,7 @@ void keyboard_post_init_kb(void) {
     al80_lcd_init();
 #endif
 
-#if defined(AL80_WIRELESS_ENABLE)
-    /* USART1 for the SmartBLE coprocessor. Brought up after the LCD so SD3 wins
-     * the interrupt-priority race during boot; the radio has no timing floor. */
-    al80_wireless_init();
-#endif
+
 
     /* Seed the live palette mirror (EEPROM if a valid magic byte is stored,
        else the compiled default without touching flash). */

@@ -95,16 +95,35 @@ static uint8_t  dbg_last_rx[4] = {0, 0, 0, 0};
 #    endif
 static uint32_t wl_switch_time = 0;
 
+/* Optimistic mode.
+ *
+ * Observed 2026-09-29: on stock firmware the module auto-connects to a
+ * previously-paired 2.4G dongle the moment it powers up -- no pairing action,
+ * no handshake from the MCU. If it does that, it has no reason to send us a
+ * connection frame, and gating reports on wireless_connected means we throw
+ * away every keystroke while the radio is perfectly healthy. That matches our
+ * symptoms exactly: TX fine, RX zero, nothing types, hardware demonstrably OK.
+ *
+ * Optimistic mode sends reports whenever we're in a wireless mode, whether or
+ * not the module ever announced itself. Auto-revert is disabled here because
+ * there is no connection signal to wait for -- Fn+T returns to USB, and
+ * unplug/replug always boots to USB. */
+#    ifndef AL80_WL_OPTIMISTIC
+#        define AL80_WL_OPTIMISTIC 1
+#    endif
+
 /* ---- low level --------------------------------------------------------- */
 
+/* Count what the driver ACCEPTED, not what we asked it to send. sdWrite returns
+ * 0 immediately when the driver is not in SD_READY, so incrementing by `len`
+ * unconditionally produces a counter that happily reports thousands of bytes
+ * while nothing reaches the wire. That mistake cost a whole debugging round. */
 static inline void ble_put(uint8_t b) {
-    sdPut(&SD1, b);
-    dbg_tx_bytes++;
+    dbg_tx_bytes += (uint16_t)sdWrite(&SD1, &b, 1);
 }
 
 static void ble_write(const uint8_t *buf, size_t len) {
-    sdWrite(&SD1, buf, len);
-    dbg_tx_bytes += (uint16_t)len;
+    dbg_tx_bytes += (uint16_t)sdWrite(&SD1, buf, len);
 }
 
 /* 60 zero bytes + settle. Every command that can reach a sleeping module needs
@@ -129,14 +148,20 @@ static void ble_cmd_pair(uint8_t mode) {
 
 /* START: connect in `mode`, advertising as AL80_BLE_NAME. Payload is fixed
  * length and zero padded; the module reads a fixed window regardless of name. */
+/* 22 bytes total: `55 14` then exactly 20 payload bytes. The length byte counts
+ * what follows it, so the buffer is 2 + 20, not 4 + 20. Stock also stamps the
+ * mode digit over the string's NUL at [18]. Confirmed byte-for-byte against
+ * stock's CONNECT at 0x08006740. */
 static void ble_cmd_start(uint8_t mode) {
-    uint8_t pkt[4 + AL80_BLE_START_LEN];
+    uint8_t pkt[2 + AL80_BLE_START_LEN];
     memset(pkt, 0, sizeof(pkt));
     pkt[0] = AL80_BLE_SYNC;
-    pkt[1] = AL80_BLE_START_LEN;
-    pkt[2] = 0x00;
+    pkt[1] = AL80_BLE_START_LEN;   /* 0x14 = 20 bytes follow */
+    pkt[2] = 0x00;                 /* command */
     pkt[3] = mode;
-    strncpy((char *)&pkt[4], AL80_BLE_NAME, AL80_BLE_START_LEN - 1);
+    memcpy(&pkt[4], AL80_BLE_NAME, sizeof(AL80_BLE_NAME) - 1); /* 14 chars, no NUL */
+    pkt[18] = (uint8_t)('0' + mode);
+    /* pkt[19..21] stay zero */
     for (uint8_t i = 0; i < 2; i++) {
         ble_write(pkt, sizeof(pkt));
         wait_ms(10);
@@ -148,10 +173,20 @@ static void ble_cmd_stop(void) {
     ble_write(pkt, sizeof(pkt));
 }
 
+/* Should we hand this report to the module? In optimistic mode, being in a
+ * wireless mode is enough. */
+static inline bool wl_should_send(void) {
+#    if AL80_WL_OPTIMISTIC
+    return kb_mode != AL80_WL_USB;
+#    else
+    return wireless_connected;
+#    endif
+}
+
 /* Battery percentage for the host's battery service. Only meaningful once a
  * link exists; sending it unconnected is harmless but pointless. */
 void al80_wireless_battery_push(uint8_t pct) {
-    if (!wireless_started || !wireless_connected) return;
+    if (!wireless_started || !wl_should_send()) return;
     const uint8_t pkt[4] = {AL80_BLE_SYNC, 0x02, 0x09, pct};
     ble_write(pkt, sizeof(pkt));
 }
@@ -176,7 +211,7 @@ static void wl_pace(void) {
 }
 
 static void wl_send_keyboard(report_keyboard_t *report) {
-    if (!wireless_connected) return;
+    if (!wl_should_send()) return;
     ble_put(AL80_BLE_SYNC);
     ble_put(0x09);
     ble_put(0x01);
@@ -186,7 +221,7 @@ static void wl_send_keyboard(report_keyboard_t *report) {
 
 #    ifdef NKRO_ENABLE
 static void wl_send_nkro(report_nkro_t *report) {
-    if (!wireless_connected) return;
+    if (!wl_should_send()) return;
     ble_put(AL80_BLE_SYNC);
     ble_put(0x15);
     ble_write((uint8_t *)report, 0x15);
@@ -254,7 +289,7 @@ static void ble_poll_rx(void) {
     static uint8_t have = 0;
     msg_t          c;
 
-    while ((c = sdGetTimeout(&SD1, TIME_IMMEDIATE)) != MSG_TIMEOUT) {
+    while ((c = sdGetTimeout(&SD1, TIME_IMMEDIATE)) >= 0) {
         uint8_t b = (uint8_t)c;
         dbg_rx_bytes++;
         dbg_last_rx[0] = dbg_last_rx[1];
@@ -290,7 +325,11 @@ bool al80_wireless_is_connected(void) {
     return wireless_connected;
 }
 
-/* Snapshot for the raw-HID diagnostic (0x4C). */
+/* Snapshot for the raw-HID diagnostic (0x4C).
+ *
+ * Reports the PERIPHERAL's own state, not our beliefs about it. Stock's values
+ * (read out of RIPPLE.bin) are BRR=0x004E, CR1=0x212C, CR2=0x0040, CR3=0x0001,
+ * and GPIOA->CRH nibble 9 = 0xB (AF push-pull 50MHz). Anything else is the bug. */
 void al80_wireless_debug(uint8_t *out) {
     out[0] = (uint8_t)kb_mode;
     out[1] = wireless_connected ? 1 : 0;
@@ -302,6 +341,22 @@ void al80_wireless_debug(uint8_t *out) {
     out[7] = dbg_last_rx[1];
     out[8] = dbg_last_rx[2];
     out[9] = dbg_last_rx[3];
+
+    out[10] = (uint8_t)SD1.state;                       /* 3 = SD_READY */
+    const uint16_t brr = (uint16_t)USART1->BRR;
+    const uint16_t cr1 = (uint16_t)USART1->CR1;
+    const uint16_t cr2 = (uint16_t)USART1->CR2;
+    const uint16_t cr3 = (uint16_t)USART1->CR3;
+    const uint16_t sr  = (uint16_t)USART1->SR;
+    out[11] = (uint8_t)(brr >> 8);  out[12] = (uint8_t)brr;
+    out[13] = (uint8_t)(cr1 >> 8);  out[14] = (uint8_t)cr1;
+    out[15] = (uint8_t)(cr2 >> 8);  out[16] = (uint8_t)cr2;
+    out[17] = (uint8_t)(cr3 >> 8);  out[18] = (uint8_t)cr3;
+    out[19] = (uint8_t)(sr >> 8);   out[20] = (uint8_t)sr;
+
+    const uint32_t crh = GPIOA->CRH;                    /* PA8..PA15 */
+    out[21] = (uint8_t)(crh >> 24); out[22] = (uint8_t)(crh >> 16);
+    out[23] = (uint8_t)(crh >> 8);  out[24] = (uint8_t)crh;
 }
 
 /* Called from process_record_kb. Records intent only -- the ~400ms of blocking
@@ -348,6 +403,7 @@ void al80_wireless_task(bool screen_busy) {
 
     /* Failsafe: a switch that never connects reverts to USB so the keyboard is
      * never left mute. */
+#    if !AL80_WL_OPTIMISTIC
     if (kb_mode != AL80_WL_USB && !wireless_connected && wl_switch_time &&
         timer_elapsed32(wl_switch_time) > AL80_WL_CONNECT_TIMEOUT_MS) {
         wl_switch_time = 0;
@@ -355,6 +411,7 @@ void al80_wireless_task(bool screen_busy) {
         if (usb_driver) host_set_driver(usb_driver);
         clear_keyboard();
     }
+#    endif
 
     if (g_wireless_request && !screen_busy) {
         const uint8_t req  = g_wireless_request;
