@@ -198,3 +198,63 @@ Cheaper experiments worth trying first, in order:
 2. **Longer settle.** 350 ms comes from the sibling; the AL80 module may want more from cold.
 3. **Listen-only boot test.** Start SD1 at boot and log any RX for 30 s without transmitting. Non-zero RX would prove the module is powered and talking, moving the fault entirely to our TX path.
 
+
+---
+
+## Outcome (2026-09-29) — closed
+
+**Bluetooth works.** With the cable out, the keyboard enumerates as `YUNZII AL80 BT1`, a BLE HID
+keyboard, VID `0228E9`. The `BT1` suffix is the mode digit our START frame stamps at `pkt[18]`, so
+that is our build advertising.
+
+Two things settled it, and neither was on the list above.
+
+**1. Init ordering.** `al80_wireless_init()` ran last in `keyboard_post_init_kb`. `board.h` leaves PA9
+in alternate-function push-pull from `halInit`, so until USART1 is enabled the pin is driven by a
+*disabled* peripheral — not a guaranteed idle-high UART line. Our ordering held that window open
+across the B7 reset pulse, matrix init, AW20216S init and the whole LCD bring-up: hundreds of
+milliseconds the module reads as a sustained break. Stock closes it immediately
+(`serial_init(460800)` first, at `0x08009FBE`). Moving ours to `keyboard_pre_init_kb`, first, took RX
+from **0 on every test all session** to a live conversation.
+
+**2. A physical switch nobody knew about.** There is a **BT / wired / dongle slide switch on the
+underside of the keyboard**. It appears nowhere in this doc, the knowledge base, the RE findings, the
+b75Pro source or the pin map. The module reads it and reports its position in the `mode` byte of
+every frame. Every "BT doesn't advertise" test was run with the switch on **dongle** — the module was
+answering mode-4 commands and ignoring mode 1/2/3 because 1/2/3 is not where the switch was.
+
+### Correction: 2.4G does NOT work
+
+Commit `7de5197` and the matching comment on snackdriven/snackdriven#6 claim 2.4G works. **They are
+wrong.** With the switch on dongle and the cable out, the keyboard does not power up at all — no
+LEDs, no LCD. The claim came from reading an ambiguous empty diagnostic response as success. Dongle
+mode on the custom build is untested and currently broken; stock's works, so it is ours to fix.
+
+### Also fixed along the way
+
+- **The TX counter was lying.** `sdWrite` returns 0 when the driver isn't `SD_READY`; we added `len`
+  regardless. "1952 bytes transmitted" may have been 1952 bytes that never existed.
+- **START was 2 bytes too long** — built 4+20, stock sends 2+20. The length byte counts what follows.
+- **RX loop could spin forever** — `sdGetTimeout` returns `MSG_RESET`, not `MSG_TIMEOUT`, when the
+  driver isn't ready.
+- **`wireless_connected` does not mean what it looks like.** The module reported `disconnected` while
+  2.4G typing worked fine on stock. Gating reports on it discards every keystroke, which is why
+  `AL80_WL_OPTIMISTIC` exists.
+
+### Cheaper experiments above: all moot
+
+Repeat-wake, longer settle and the listen-only boot test were never needed. The registers matched
+stock exactly (`BRR 0x004E`, `CR1 0x212C`, `CR2 0x0040`, `CR3 0x0001`, `GPIOA->CRH` PA9 nibble `0xB`),
+verified live on hardware via raw-HID `0x4C`. It was *when*, not *what*.
+
+### Boot mode (v36)
+
+Last mode chosen by keycode is persisted in byte 1 of the `EECONFIG_USER` dword and restored on boot,
+but only when USB does not enumerate inside a 2500 ms grace window — see the `2026-09-29` section of
+`AL80_KNOWLEDGE_BASE.md` for why it is not unconditional and why the store is not in the KB
+datablock.
+
+### Still open
+
+`send_raw_hid` is a no-op while wireless, so al80-studio, clock sync and the diagnostics go dark on
+wireless even with the cable still plugged in.

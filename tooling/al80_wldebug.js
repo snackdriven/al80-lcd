@@ -9,12 +9,29 @@
 const HID = require('node-hid');
 const VID = 0x28e9, PID = 0x30af, USAGE_PAGE = 0xff60;
 
-const m = HID.devices()
-  .filter(d => d.vendorId === VID && d.productId === PID)
-  .find(d => d.usagePage === USAGE_PAGE);
-if (!m) { console.error('0xFF60 interface not found -- is al80-studio or Vial holding it?'); process.exit(1); }
+/* The interface is exclusive, and a scheduled task (AL80BindingsRestore, every
+ * 10 min) or al80-studio can hold it for a moment. Losing that race is normal,
+ * not an error worth a stack trace -- so retry briefly, then explain. */
+function openWithRetry(tries = 12, delayMs = 250) {
+  for (let i = 0; i < tries; i++) {
+    const m = HID.devices()
+      .filter(d => d.vendorId === VID && d.productId === PID)
+      .find(d => d.usagePage === USAGE_PAGE);
+    if (m) {
+      try { return new HID.HID(m.path); } catch (e) { /* busy, retry */ }
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  }
+  console.error('');
+  console.error("Could not get the keyboard 0xFF60 interface after several tries.");
+  console.error('Usual causes:');
+  console.error('  - al80-studio or Vial is open in a browser tab (close it)');
+  console.error('  - the keyboard is in wireless mode, so raw HID is not routed over USB');
+  console.error('  - the keyboard is unplugged or in DFU');
+  process.exit(1);
+}
 
-const dev = new HID.HID(m.path);
+const dev = openWithRetry();
 try {
   const buf = Buffer.alloc(33, 0);
   buf[1] = 0x4c;
@@ -77,6 +94,14 @@ try {
     }
     console.log('');
   }
+
+  /* Boot mode. out[45..47] -> r[46..48]. */
+  const bootByte = r[46], moduleMode = r[47], flags = r[48];
+  const bootMode = (bootByte & 0xf0) === 0xa0 ? (bootByte & 0x0f) : null;
+  console.log(`  boot mode     : ${bootMode === null ? 'unset (boots USB)' : MODES[bootMode] ?? bootMode}`);
+  console.log(`  module says   : ${moduleMode ? MODES[moduleMode] ?? moduleMode : 'nothing yet'}   (follows the switch on the back)`);
+  console.log(`  boot decided  : ${flags & 1 ? 'yes' : 'not yet'}${flags & 2 ? '   (restored, USB can reclaim)' : ''}`);
+  console.log('');
 
   if (bad)            console.log(`>> ${bad} register(s) wrong -- that IS the bug. Fix before looking downstream.`);
   else if (tx === 0)  console.log('>> Registers correct but nothing accepted. Driver refused the writes.');

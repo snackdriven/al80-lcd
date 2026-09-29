@@ -28,12 +28,26 @@ const BINDINGS = [
 
 const APPLY = process.argv.includes('--apply');
 
-function open() {
-  const m = HID.devices()
-    .filter(d => d.vendorId === VID && d.productId === PID)
-    .find(d => d.usagePage === USAGE_PAGE);
-  if (!m) throw new Error('0xFF60 interface not found -- is al80-studio or Vial holding it?');
-  return new HID.HID(m.path);
+/* The interface is exclusive, and a scheduled task (AL80BindingsRestore, every
+ * 10 min) or al80-studio can hold it for a moment. Losing that race is normal,
+ * not an error worth a stack trace -- so retry briefly, then explain. */
+function openWithRetry(tries = 12, delayMs = 250) {
+  for (let i = 0; i < tries; i++) {
+    const m = HID.devices()
+      .filter(d => d.vendorId === VID && d.productId === PID)
+      .find(d => d.usagePage === USAGE_PAGE);
+    if (m) {
+      try { return new HID.HID(m.path); } catch (e) { /* busy, retry */ }
+    }
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+  }
+  console.error('');
+  console.error("Could not get the keyboard 0xFF60 interface after several tries.");
+  console.error('Usual causes:');
+  console.error('  - al80-studio or Vial is open in a browser tab (close it)');
+  console.error('  - the keyboard is in wireless mode, so raw HID is not routed over USB');
+  console.error('  - the keyboard is unplugged or in DFU');
+  process.exit(1);
 }
 
 function xfer(dev, bytes) {
@@ -49,7 +63,7 @@ const get = (dev, l, r, c) => {
 };
 const set = (dev, l, r, c, kc) => xfer(dev, [ID_SET, l, r, c, (kc >> 8) & 0xff, kc & 0xff]);
 
-const dev = open();
+const dev = openWithRetry();
 let missing = 0, fixed = 0;
 
 try {

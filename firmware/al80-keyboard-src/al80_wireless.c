@@ -39,6 +39,7 @@
 #    include "host.h"
 #    include "host_driver.h"
 #    include "report.h"
+#    include "usb_device_state.h"
 
 /* ---- wire constants ---------------------------------------------------- */
 
@@ -77,6 +78,7 @@ static uint32_t       last_report_time  = 0;
  * Encodes mode+1 so that 0 stays "idle"; pair requests set the high bit. */
 static uint8_t g_wireless_request = 0;
 #    define AL80_REQ_PAIR_FLAG 0x80
+#    define AL80_REQ_NOSAVE_FLAG 0x40 /* restore/fallback: don't rewrite the boot mode */
 
 /* Diagnostics. The module is a black box and this is the first firmware that has
  * ever spoken to it, so count both directions and keep the last frame seen --
@@ -118,6 +120,43 @@ static uint32_t wl_switch_time = 0;
 #    ifndef AL80_WL_OPTIMISTIC
 #        define AL80_WL_OPTIMISTIC 1
 #    endif
+
+/* ---- boot mode --------------------------------------------------------- */
+
+/* Coming up in USB every time means pressing Fn+Q after every power-on -- and on
+ * battery there is no host to press it from, so the keyboard is simply mute
+ * until you plug it back in. So remember the last mode you chose and restore it.
+ *
+ * Stored in byte 1 of the EECONFIG_USER dword, NOT in the KB datablock. Growing
+ * EECONFIG_KB_DATA_SIZE shifts EECONFIG_SIZE and with it
+ * DYNAMIC_KEYMAP_EEPROM_START, which scrambles the whole stored keymap (see the
+ * long note above al80_apply_dynamic_keymap_fixups in al80.c). The user dword is
+ * a core eeconfig field at a constant address; al80.c already keeps its fixups
+ * version in byte 0 and both sides read-modify-write, so neither disturbs the
+ * other. High nibble is a tag, so a fresh board (0x00) reads as "never written"
+ * rather than as mode 0.
+ *
+ * Only ever holds a mode the USER picked. A restore, or a fallback to USB
+ * because the cable came back, does not overwrite it. */
+#    define AL80_WL_BOOT_SHIFT 8
+#    define AL80_WL_BOOT_MASK 0x0000FF00u
+#    define AL80_WL_BOOT_TAG 0xA0
+
+/* How long USB gets to enumerate before we conclude there is no host and go
+ * wireless. A host configures us well inside a second; this is slack for a hub. */
+#    ifndef AL80_WL_BOOT_GRACE_MS
+#        define AL80_WL_BOOT_GRACE_MS 2500
+#    endif
+
+static bool     wl_boot_done = false; /* boot decision made */
+static uint32_t wl_boot_time = 0;     /* set in init: start of the grace window */
+static bool     wl_auto_mode = false; /* mode came from a restore, not a keypress */
+
+/* Mode field of the last frame the module sent (1..4). The module reports its
+ * own state, which on this unit follows the physical BT/wired/dongle switch on
+ * the back -- so when it talks to us it is more authoritative about where the
+ * radio actually is than anything we have stored. 0 = it has not said. */
+static uint8_t module_mode = 0;
 
 /* ---- low level --------------------------------------------------------- */
 
@@ -274,6 +313,8 @@ static void ble_handle_frame(uint8_t cmd, uint8_t mode, uint8_t data) {
     dbg_frame_head = (uint8_t)((dbg_frame_head + 1) % AL80_WL_FRAME_LOG);
     if (dbg_frame_count < AL80_WL_FRAME_LOG) dbg_frame_count++;
 
+    if (mode >= AL80_WL_BT1 && mode <= AL80_WL_24G) module_mode = mode;
+
     switch (cmd) {
         case 0x00: /* connection status */
             wireless_connected = (data != 0);
@@ -319,6 +360,24 @@ static void ble_poll_rx(void) {
 
 /* ---- public API -------------------------------------------------------- */
 
+/* ---- boot mode storage ------------------------------------------------- */
+
+static al80_wl_mode_t wl_boot_mode_load(void) {
+    const uint8_t b = (uint8_t)((eeconfig_read_user() & AL80_WL_BOOT_MASK) >> AL80_WL_BOOT_SHIFT);
+    if ((b & 0xF0) != AL80_WL_BOOT_TAG) return AL80_WL_USB; /* never written */
+    const uint8_t m = b & 0x0F;
+    return (m <= (uint8_t)AL80_WL_24G) ? (al80_wl_mode_t)m : AL80_WL_USB;
+}
+
+static void wl_boot_mode_save(al80_wl_mode_t mode) {
+    const uint32_t ecu  = eeconfig_read_user();
+    const uint32_t want = (ecu & ~AL80_WL_BOOT_MASK) |
+                          ((uint32_t)(AL80_WL_BOOT_TAG | (uint8_t)mode) << AL80_WL_BOOT_SHIFT);
+    /* Emulated flash here is wear-levelled but not free, and a mode you are
+     * already booting into is not worth a write. */
+    if (want != ecu) eeconfig_update_user(want);
+}
+
 void al80_wireless_init(void) {
     /* USART1 on its default pins: PA9 TX, PA10 RX. No AFIO remap needed --
      * unlike USART3, which the LCD drives on the partial remap. */
@@ -327,6 +386,7 @@ void al80_wireless_init(void) {
     sdStart(&SD1, &ble_serial_config);
     wireless_started = true;
     usb_driver       = host_get_driver();
+    wl_boot_time     = timer_read32();
 }
 
 al80_wl_mode_t al80_wireless_mode(void) {
@@ -378,22 +438,37 @@ void al80_wireless_debug(uint8_t *out) {
         out[27 + i * 3 + 1] = dbg_frames[i][1];
         out[27 + i * 3 + 2] = dbg_frames[i][2];
     }
+
+    /* boot-mode state. The raw-HID report is RAW_EPSIZE = 64 bytes, so there is
+     * plenty of room past the frame ring at out[44]. */
+    out[45] = (uint8_t)((eeconfig_read_user() & AL80_WL_BOOT_MASK) >> AL80_WL_BOOT_SHIFT);
+    out[46] = module_mode;
+    out[47] = (uint8_t)((wl_boot_done ? 0x01 : 0) | (wl_auto_mode ? 0x02 : 0));
 }
 
 /* Called from process_record_kb. Records intent only -- the ~400ms of blocking
  * work happens later, off the key path. */
-void al80_wireless_request(al80_wl_mode_t mode, bool pair) {
-    g_wireless_request = (uint8_t)(mode + 1) | (pair ? AL80_REQ_PAIR_FLAG : 0);
+static void wl_request(al80_wl_mode_t mode, bool pair, bool save) {
+    g_wireless_request = (uint8_t)(mode + 1) | (pair ? AL80_REQ_PAIR_FLAG : 0) |
+                         (save ? 0 : AL80_REQ_NOSAVE_FLAG);
 }
 
-static void al80_wireless_apply(al80_wl_mode_t mode, bool pair) {
+void al80_wireless_request(al80_wl_mode_t mode, bool pair) {
+    /* A keypress is the user choosing, and that is what gets remembered. */
+    wl_request(mode, pair, true);
+}
+
+static void al80_wireless_apply(al80_wl_mode_t mode, bool pair, bool save) {
     if (!wireless_started) return;
+
+    if (save) wl_boot_mode_save(mode);
 
     if (mode == AL80_WL_USB) {
         ble_wake(100);
         ble_cmd_stop();
         wireless_connected = false;
         kb_mode            = AL80_WL_USB;
+        wl_auto_mode       = false;
         if (usb_driver) host_set_driver(usb_driver);
         return;
     }
@@ -410,6 +485,7 @@ static void al80_wireless_apply(al80_wl_mode_t mode, bool pair) {
     }
 
     kb_mode        = mode;
+    wl_auto_mode   = !save; /* restored rather than asked for: USB may reclaim us */
     wl_switch_time = timer_read32();
     if (!usb_driver) usb_driver = host_get_driver();
     host_set_driver(&wl_driver);
@@ -434,10 +510,42 @@ void al80_wireless_task(bool screen_busy) {
     }
 #    endif
 
+    /* Boot decision, made once.
+     *
+     * Deliberately not unconditional. Restoring a wireless mode while the cable
+     * is in and the host has enumerated us leaves the keyboard mute for no
+     * visible reason -- the exact failure the auto-revert exists to prevent. So
+     * USB gets first refusal: if it configures inside the grace window we stay
+     * put, and only a host-less power-up (battery, or a charger) goes wireless.
+     *
+     * The module's own reported mode wins over the stored one when we have it,
+     * because on this unit it follows the physical switch on the back. */
+    if (!wl_boot_done) {
+        if (usb_device_state_get_configure_state() == USB_DEVICE_STATE_CONFIGURED) {
+            wl_boot_done = true; /* a host owns us; USB stays */
+        } else if (timer_elapsed32(wl_boot_time) > AL80_WL_BOOT_GRACE_MS) {
+            wl_boot_done              = true;
+            const al80_wl_mode_t want = module_mode ? (al80_wl_mode_t)module_mode : wl_boot_mode_load();
+            if (want != AL80_WL_USB) wl_request(want, false, false);
+        }
+    }
+
+    /* Cable came back while we were on a mode nobody asked for. Hand the host
+     * its keyboard back; the stored choice is untouched, so the next host-less
+     * boot still comes up wireless. */
+    if (wl_auto_mode && kb_mode != AL80_WL_USB &&
+        usb_device_state_get_configure_state() == USB_DEVICE_STATE_CONFIGURED) {
+        wl_auto_mode = false;
+        clear_keyboard();
+        wl_request(AL80_WL_USB, false, false);
+    }
+
     if (g_wireless_request && !screen_busy) {
         const uint8_t req  = g_wireless_request;
+        const uint8_t mode = (uint8_t)((req & 0x0F) - 1);
         g_wireless_request = 0;
-        al80_wireless_apply((al80_wl_mode_t)((req & ~AL80_REQ_PAIR_FLAG) - 1), (req & AL80_REQ_PAIR_FLAG) != 0);
+        al80_wireless_apply((al80_wl_mode_t)mode, (req & AL80_REQ_PAIR_FLAG) != 0,
+                            (req & AL80_REQ_NOSAVE_FLAG) == 0);
     }
 }
 

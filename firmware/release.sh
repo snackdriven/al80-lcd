@@ -49,7 +49,7 @@ wsl.exe -e bash -lc "$QMK
 set -e
 cp .build/yunzii_al80_vial.bin '$WSLLCD/firmware/$BIN'
 cp .build/yunzii_al80_vial.bin /mnt/c/Users/bette/Downloads/$BIN
-cp keyboards/yunzii/al80/{al80.c,al80.h,config.h,rules.mk,mcuconf.h,halconf.h,keyboard.json,rgb_matrix_kb.inc} '$WSLLCD/firmware/al80-keyboard-src/'
+cp keyboards/yunzii/al80/{al80.c,al80.h,al80_wireless.c,config.h,rules.mk,mcuconf.h,halconf.h,keyboard.json,rgb_matrix_kb.inc} '$WSLLCD/firmware/al80-keyboard-src/'
 cp keyboards/yunzii/al80/keymaps/vial/{keymap.c,rules.mk} '$WSLLCD/firmware/al80-keyboard-src/' 2>/dev/null || true"
 
 echo "== commit =="

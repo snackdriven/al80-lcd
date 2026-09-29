@@ -1,7 +1,7 @@
 ---
 title: YUNZII AL80 LCD — Reverse-Engineering Knowledge Base
 status: active
-updated: 2026-07-04
+updated: 2026-09-29
 device: YUNZII AL80 keyboard (VID 0x28E9, PID 0x30AF)
 scope: HID + PK_* display protocol for the AL80 LCD panel — 12-hour clock hack, still-image and GIF streaming, picture DISPLAY/commit, VIA keymap, custom-QMK + hardware RE
 confirmed: FULLY DECODED — HID upload protocol re-derived from web JS + desktop Qt app (§14) AND the display module's PK_* commit protocol RE'd from RIPPLE.bin + b75Pro sibling source (§D, 2026-07-04). One additive checksum (yne) all packets, CRC16-MODBUS announces, full command map, still-image + GIF upload byte-maps, GIF frame-count/FPS bytes, date payload, clear commands, DFU sequence. Display 96×160 RGB565 BE ROW-MAJOR. Picture DISPLAY solved (PK_ADD_PIC commit + two settles, NO trailing view switch). Banding = dropped bytes, fix = ACK-gating (parity-slip + column-major theories retired). now-playing LIVE on-device. Wireless/battery/side-bar RE done; custom QMK compiles (LCD-on-custom now PORTABLE FROM SOURCE — screen enable is C9 not B7, no logic analyzer; see research/custom-qmk-lcd-port-plan.md).
@@ -16,6 +16,12 @@ LCD panel, the display module's **PK_* commit protocol** (how to actually SHOW a
 display resolution (**96×160** — corrected 2026-07-02), the still-image and GIF packet structure,
 the tooling built, the read-only command-sweep result, custom-QMK + hardware RE, open questions,
 and future modification ideas.
+
+> **HEADS UP (2026-09-29):** There is a **physical BT / wired / dongle slide switch on the
+> underside of the keyboard**, documented nowhere else in this file, the RE findings, or the b75Pro
+> source. The radio mode keycodes only pick a slot *within* whatever that switch allows, so set the
+> switch first. Bluetooth is **confirmed working on custom firmware**; the earlier claim that
+> **2.4G/dongle works is WRONG** (see the `2026-09-29` section, which corrects commit `7de5197`).
 
 > **HEADS UP (2026-07-04):** The **`## 2026-07-04` section up top is the newest ground truth** —
 > read it first. It cracks the picture **DISPLAY** protocol (`PK_ADD_PIC` commit + two mandatory
@@ -32,6 +38,80 @@ and future modification ideas.
 > official firmwares). The panel is **96×160, not 112×137**; still images have a **32-byte tail
 > block**; GIFs need **mandatory send pacing**. Read the corrected section immediately below
 > first — it supersedes the older text, which is kept with inline correction markers.
+
+---
+
+## 2026-09-29 — Wireless ON CUSTOM FIRMWARE: BT works, 2.4G does not, and there is a PHYSICAL switch
+
+**Read this before touching anything wireless.** It corrects the record twice and documents a piece
+of hardware that appears nowhere else in this knowledge base, the RE findings, the b75Pro source, or
+the pin map.
+
+### There is a 3-position slide switch on the underside of the keyboard
+
+**BT / wired / dongle.** Nothing in software can see it directly and nothing can override it. The
+radio module reads it and reports its position back to the STM32 in the `mode` byte of every frame
+it sends (`55 03 <cmd> <mode> <data>`).
+
+This is the single most expensive thing we did not know. Every failed Bluetooth test — tap Fn+Q,
+3-second hold, USB-first-then-BT, four firmware builds — was run with the switch on **dongle**. The
+module was answering mode-4 commands and ignoring mode 1/2/3 because mode 1/2/3 is not where the
+switch was. "BT doesn't advertise" was never a firmware bug.
+
+**So: set the switch first, then pick the mode with the keycode.** The keycode selects a slot within
+whatever the switch already allows.
+
+### ✅ Bluetooth works on custom firmware — objectively confirmed
+
+With the switch on **BT** and the cable out, the keyboard enumerates on the host as a BLE HID
+keyboard:
+
+```
+YUNZII AL80 BT1        BTHLEDEVICE\...&_DEV_VID&0228E9_PID&2000_REV&0109_...  →  HID Keyboard Device
+```
+
+The `BT1` suffix is the mode digit our firmware stamps at `pkt[18]` of the START frame, so this is
+demonstrably **our** build advertising, not a stock leftover.
+
+### ❌ CORRECTION: 2.4G / dongle mode does NOT work
+
+Commit `7de5197` ("2.4G wireless WORKS on custom firmware") and the matching comment on
+snackdriven/snackdriven#6 are **wrong**. With the switch on dongle, the keyboard does not power up
+at all once the cable is out — no LEDs, no LCD, nothing. That claim came from reading an ambiguous
+empty diagnostic response as success. Treat dongle mode as **untested and currently broken** on the
+custom build. Stock firmware's dongle mode does work, so this is ours to fix, not a hardware fault.
+
+### Boot mode is persisted (v36) — and USB still gets first refusal
+
+Earlier builds always came up in USB mode, which meant pressing Fn+Q after every power-on. On
+battery there is no host to press it from, so the keyboard was simply mute until you plugged it back
+in.
+
+`al80_wireless.c` now remembers the last mode **you chose with a keycode** and restores it on boot:
+
+- Stored in **byte 1 of the `EECONFIG_USER` dword** — a core eeconfig field at a constant address.
+  **Not** in the KB datablock: growing `EECONFIG_KB_DATA_SIZE` shifts `EECONFIG_SIZE` and with it
+  `DYNAMIC_KEYMAP_EEPROM_START`, which scrambles the entire stored keymap. Byte 0 is al80.c's
+  dynamic-keymap fixups version; both sides read-modify-write, so neither disturbs the other.
+- High nibble is a `0xA` tag, so a fresh board (`0x00`) reads as "never written" rather than mode 0.
+- **USB gets first refusal.** On boot we wait up to `AL80_WL_BOOT_GRACE_MS` (2500 ms) for
+  `usb_device_state_get_configure_state() == USB_DEVICE_STATE_CONFIGURED`. A host that enumerates in
+  that window keeps the keyboard; only a host-less power-up (battery, or a charger) goes wireless.
+  Restoring unconditionally would leave the keyboard mute with the cable plugged in for no visible
+  reason — the exact failure the auto-revert exists to prevent.
+- **The module's reported mode wins over the stored one** when we have it, because it follows the
+  physical switch.
+- If the cable comes back while we are on a *restored* mode, USB reclaims the keyboard and the stored
+  choice is left alone, so the next host-less boot still comes up wireless. A mode you picked by
+  keycode is never overridden this way.
+- Fn+T (USB) and an unplug/replug remain the manual escapes. `tooling/al80_wldebug.js` prints the
+  stored boot mode, the module's reported mode, and whether the boot decision has been made.
+
+### Still open
+
+`send_raw_hid` is a no-op while wireless, so al80-studio, the clock sync and the diagnostics all go
+dark on wireless even though the USB cable may still be physically connected. Raw HID should keep
+flowing over USB regardless of where HID reports are going.
 
 ---
 
