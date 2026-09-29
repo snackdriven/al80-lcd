@@ -12,3 +12,6 @@
 /* USART3 for the LCD pass-through (partial remap PC10/PC11) */
 #undef STM32_SERIAL_USE_USART3
 #define STM32_SERIAL_USE_USART3 TRUE
+/* ADC1 for the battery gauge (ch9 = B1, internal Vref ch17) */
+#undef STM32_ADC_USE_ADC1
+#define STM32_ADC_USE_ADC1 TRUE

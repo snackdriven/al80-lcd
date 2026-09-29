@@ -27,12 +27,14 @@ Setting `MCU_LDSCRIPT = STM32F103xB` moves the ceiling from 56 KB to 120 KB. The
 
 ```
 0x08002000 - 0x0800F840   v29 firmware              55,360 B
-0x0800F840 - 0x08013000   runtime data, ~9 KB       << UNIDENTIFIED — resolve before expanding
-0x08013000 - 0x0801E000   free                      44 KB
+0x0800F840 - 0x080124DC   DEAD stock firmware tail  ~9 KB   (resolved 2026-09-29)
+0x080124DC - 0x0801E000   free                      ~43 KB
 0x0801E000 - 0x08020000   emulated EEPROM, ~2.4 KB  << QMK settings; do not overwrite
 ```
 
-The 44 KB gap is where a wireless stack would live. **The ~9 KB region directly above the firmware must be identified first** — likely Vial dynamic keymap or LCD image cache. Expanding the app blindly into it would silently eat keymaps or saved images.
+**The ~9 KB above the firmware is not live data — it's leftover stock firmware.** Compared byte-for-byte against `YUNZII_AL80_RIPPLE.bin` at the same offset: **9,422 of 9,436 bytes identical (99.85%)**, versus 4% for V0119 and 6% for SIGNALRGB V0122. The custom image (55 KB) is smaller than the stock one (66 KB), so flashing only erased the pages it needed and the tail of the old RIPPLE image survived. The 14 differing bytes are a small runtime-written delta.
+
+So nothing needs preserving there. Usable code space is `0x08002000` → `0x0801E000` = **112 KB**, with only the top 8 KB reserved for EEPROM.
 
 ## The protocol
 
