@@ -150,3 +150,51 @@ Every phase is reversible. `AL80_CUSTOM_QMK_v29_panel-hostonly.bin` is committed
 - `AL80_KNOWLEDGE_BASE.md` §D5 — inbound commands, UART parameters, BLE advertised name
 - Flash dump 2026-09-29 — memory map, 128 KB confirmation
 - `firmware/al80-keyboard-src/al80.c` — existing SD3 pattern to mirror
+
+---
+
+## Hardware test log — 2026-09-29
+
+### What happened
+
+Flashed, bound `CUSTOM(1-4)` + `CUSTOM(30)` to Fn+Q/W/E/R/T, pressed Fn+Q (hold = pair).
+
+- Typing stopped → the `host_set_driver()` swap works
+- `YUNZII AL80 BT` **never appeared** on a phone
+- Diagnostic (raw-HID `0x4C`): **TX = 70 bytes, RX = 0**
+
+70 is exactly 60 wake bytes + two 5-byte PAIR frames, so the full command path executed and SD1 accepted every byte. The module never answered — not once, including at power-on, where most BLE modules emit *something*.
+
+### Confirmed working
+
+- Keycode dispatch, hold-vs-tap detection, the ~400 ms deferred switch
+- `host_driver_t` swap and restore
+- 6 s connect timeout reverting to USB (added after the first test left the keyboard mute)
+- LCD over USART3 unaffected throughout — no shear, no stall
+
+### Ruled out
+
+- **PA9/PA10 are not matrix pins** (matrix is A0-A4/C5 × B0..C13)
+- **`USART1_REMAP` is never set** — the `AFIO->MAPR` writes preserve unrelated bits, so TX stays on PA9
+- **No power-enable pin in the sibling source.** Searched the whole b75Pro tree for `*_EN/PWR/RST` defines and for GPIO writes outside LED/matrix code: nothing
+- **Same peripheral and baud as the sibling** — `mk25047/config.h` sets `SERIAL_DRIVER SD1`, `SD1_TX_PAL_MODE PAL_MODE_ALTERNATE_PUSHPULL`, `uart_init(460800)`
+- **`smart_ble_startup()` is not a power-on** — it is just `ap2_ble_swtich_ble_driver()`, the host-driver swap
+
+### Correction to an earlier claim
+
+An earlier note in this doc said no radio enable GPIO exists, citing the AF-pin enumeration in `research/al80-qmk-hardware-params.md`. **That enumeration only covers alternate-function pins.** A plain push-pull power-enable output would not appear in it. A power pin remains a live hypothesis.
+
+### Known good on stock
+
+The owner has used both Bluetooth and the 2.4G dongle on this unit with stock firmware. **The radio hardware is present and functional** — the fault is in our firmware, not the board.
+
+### Next step: targeted RE of stock's USART1 bring-up
+
+The literal pool at `0x0800A50C`–`0x0800A580` in `RIPPLE.bin` holds RCC, GPIOA, USART1, USART3 and AFIO bases together — that is the serial init function, and diffing its sequence against ours is the definitive path. Worth a dedicated session with the same discipline as `custom-qmk-lcd-port-plan.md`.
+
+Cheaper experiments worth trying first, in order:
+
+1. **Repeat the wake burst.** Send the 60 zero bytes several times over a few seconds instead of once. If the module sits in a deeper sleep than the sibling's, a single burst may not reach it.
+2. **Longer settle.** 350 ms comes from the sibling; the AL80 module may want more from cold.
+3. **Listen-only boot test.** Start SD1 at boot and log any RX for 30 s without transmitting. Non-zero RX would prove the module is powered and talking, moving the fault entirely to our TX path.
+
