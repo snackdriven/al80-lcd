@@ -86,6 +86,13 @@ static uint16_t dbg_tx_bytes = 0;
 static uint16_t dbg_rx_bytes = 0;
 static uint8_t  dbg_last_rx[4] = {0, 0, 0, 0};
 
+/* Ring of the last 6 COMPLETE frames (cmd, mode, data). The 4-byte peephole
+ * above showed the module was alive but not what it was saying. */
+#    define AL80_WL_FRAME_LOG 6
+static uint8_t dbg_frames[AL80_WL_FRAME_LOG][3];
+static uint8_t dbg_frame_head  = 0;
+static uint8_t dbg_frame_count = 0;
+
 /* If a mode switch never produces a connection, fall back to USB rather than
  * leaving the keyboard mute. Shipping without this was a mistake: a failed
  * switch silently killed typing with no indication and no way back except a
@@ -261,7 +268,12 @@ static host_driver_t wl_driver = {
 /* Module -> STM32 frames are `55 03 <cmd> <mode> <data>`. Only three commands
  * exist (KB SD5): connection status, host lock LEDs, and suspend/resume. */
 static void ble_handle_frame(uint8_t cmd, uint8_t mode, uint8_t data) {
-    (void)mode;
+    dbg_frames[dbg_frame_head][0] = cmd;
+    dbg_frames[dbg_frame_head][1] = mode;
+    dbg_frames[dbg_frame_head][2] = data;
+    dbg_frame_head = (uint8_t)((dbg_frame_head + 1) % AL80_WL_FRAME_LOG);
+    if (dbg_frame_count < AL80_WL_FRAME_LOG) dbg_frame_count++;
+
     switch (cmd) {
         case 0x00: /* connection status */
             wireless_connected = (data != 0);
@@ -357,6 +369,15 @@ void al80_wireless_debug(uint8_t *out) {
     const uint32_t crh = GPIOA->CRH;                    /* PA8..PA15 */
     out[21] = (uint8_t)(crh >> 24); out[22] = (uint8_t)(crh >> 16);
     out[23] = (uint8_t)(crh >> 8);  out[24] = (uint8_t)crh;
+
+    /* frame ring: count, head, then 6 x (cmd, mode, data) */
+    out[25] = dbg_frame_count;
+    out[26] = dbg_frame_head;
+    for (uint8_t i = 0; i < AL80_WL_FRAME_LOG; i++) {
+        out[27 + i * 3 + 0] = dbg_frames[i][0];
+        out[27 + i * 3 + 1] = dbg_frames[i][1];
+        out[27 + i * 3 + 2] = dbg_frames[i][2];
+    }
 }
 
 /* Called from process_record_kb. Records intent only -- the ~400ms of blocking

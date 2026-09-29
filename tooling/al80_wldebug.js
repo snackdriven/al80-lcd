@@ -25,7 +25,6 @@ try {
   const hex = (v, w = 4) => '0x' + v.toString(16).toUpperCase().padStart(w, '0');
 
   const MODES  = ['USB', 'BT1', 'BT2', 'BT3', '2.4G'];
-  const STATES = { 0: 'UNINIT', 1: 'STOP', 2: 'READY', 3: 'READY' };
 
   const mode = r[1], connected = r[2];
   const tx = u16(3), rx = u16(5);
@@ -44,7 +43,7 @@ try {
 
   /* Expected values read out of stock RIPPLE.bin. */
   const checks = [
-    ['SD1.state', sdState, 3, v => v, 'driver READY'],
+    ['SD1.state', sdState, 2, v => v, 'SD_READY (ChibiOS: UNINIT=0 STOP=1 READY=2)'],
     ['USART1->BRR', brr, 0x004e, hex, '460800 @ PCLK2 36MHz'],
     ['USART1->CR1', cr1, 0x212c, hex, 'UE|PEIE|RXNEIE|TE|RE'],
     ['USART1->CR2', cr2, 0x0040, hex, '1 stop bit'],
@@ -62,9 +61,27 @@ try {
   console.log(`  --   ${'USART1->SR'.padEnd(14)} ${hex(sr)}   TXE=${(sr >> 7) & 1} TC=${(sr >> 6) & 1} RXNE=${(sr >> 5) & 1} ORE=${(sr >> 3) & 1} FE=${(sr >> 1) & 1}`);
   console.log('');
 
+  /* Decoded frame ring: what the module actually said. */
+  const CMDS = { 0: 'connection-status', 1: 'host-lock-LED', 2: 'power' };
+  const fCount = r[26], fHead = r[27];
+  if (fCount) {
+    console.log(`  frames received (${fCount}, oldest first):`);
+    for (let n = 0; n < fCount; n++) {
+      const i = (fHead - fCount + n + 6) % 6;
+      const b = 28 + i * 3;
+      const [cmd, mode, data] = [r[b], r[b + 1], r[b + 2]];
+      let note = CMDS[cmd] ?? `cmd ${cmd}?`;
+      if (cmd === 0) note += data ? '  -> CONNECTED' : '  -> disconnected';
+      if (cmd === 2) note += data === 0xaa ? '  -> suspend' : data === 0xbb ? '  -> resume' : '';
+      console.log(`    cmd=${hex(cmd,2)} mode=${hex(mode,2)} data=${hex(data,2)}   ${note}`);
+    }
+    console.log('');
+  }
+
   if (bad)            console.log(`>> ${bad} register(s) wrong -- that IS the bug. Fix before looking downstream.`);
   else if (tx === 0)  console.log('>> Registers correct but nothing accepted. Driver refused the writes.');
   else if (rx === 0)  console.log('>> Registers correct, bytes accepted, module silent. Fault is downstream of the MCU: wiring or the module itself.');
+  else if (!connected) console.log('>> Module is talking but has not reported a connection (cmd 0 with data!=0). See the frames above.');
   else                console.log('>> Two-way traffic. Protocol-level problem.');
 } finally {
   dev.close();
