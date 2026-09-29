@@ -15,3 +15,6 @@
 /* ADC1 for the battery gauge (ch9 = B1, internal Vref ch17) */
 #undef STM32_ADC_USE_ADC1
 #define STM32_ADC_USE_ADC1 TRUE
+/* USART1 for the SmartBLE radio coprocessor (PA9 TX / PA10 RX, default pins) */
+#undef STM32_SERIAL_USE_USART1
+#define STM32_SERIAL_USE_USART1 TRUE

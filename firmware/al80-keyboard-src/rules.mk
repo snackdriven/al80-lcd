@@ -5,6 +5,12 @@ SPI_DRIVER_REQUIRED = yes
 SERIAL_DRIVER_REQUIRED = yes
 OPT_DEFS += -DAL80_LCD_ENABLE
 
+# BLE / 2.4G via the SmartBLE coprocessor on USART1 (SD1). Second serial
+# instance alongside the LCD's SD3 -- both raw ChibiOS, not QMK's single-
+# instance uart.h wrapper.
+SRC += al80_wireless.c
+OPT_DEFS += -DAL80_WIRELESS_ENABLE
+
 # Custom, user-recolorable RGB matrix effect (PALETTE_CYCLE)
 RGB_MATRIX_CUSTOM_KB = yes
 ANALOG_DRIVER_REQUIRED = yes

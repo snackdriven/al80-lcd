@@ -214,6 +214,33 @@ bool process_record_kb(uint16_t keycode, keyrecord_t *record) {
         case AL80_KC_PANEL_NEXT:
             if (record->event.pressed) al80_panel_req(0xF1);  /* advance one panel, no local view */
             return false;
+
+#if defined(AL80_WIRELESS_ENABLE)
+        /* Tap = connect to that slot, hold = re-pair it. Matching stock's feel:
+         * you only want pairing mode deliberately, not every time you switch back
+         * to a device you already own.
+         *
+         * These only set a flag. The switch itself blocks ~400ms (wake bytes plus
+         * the module's settle) and runs from housekeeping -- doing it here would
+         * stall typing exactly the way v24 did. */
+        case AL80_KC_BT1:
+        case AL80_KC_BT2:
+        case AL80_KC_BT3:
+        case AL80_KC_24G: {
+            static uint32_t wl_down = 0;
+            const al80_wl_mode_t mode = (al80_wl_mode_t)(keycode - QK_KB_0);
+            if (record->event.pressed) {
+                wl_down = timer_read32();
+            } else {
+                al80_wireless_request(mode, timer_elapsed32(wl_down) >= AL80_WL_PAIR_HOLD_MS);
+            }
+            return false;
+        }
+        case AL80_KC_USB:
+            if (record->event.pressed) al80_wireless_request(AL80_WL_USB, false);
+            return false;
+#endif
+
         default:
             return process_record_user(keycode, record);
     }
@@ -590,6 +617,12 @@ void housekeeping_task_kb(void) {
             al80_battery_push();
         }
     }
+#if defined(AL80_WIRELESS_ENABLE)
+    /* Outside the !g_screen_busy block on purpose: RX polling is non-blocking and
+     * should keep draining even mid-image, while the blocking mode switch inside
+     * al80_wireless_task() gates itself on the flag we pass in. */
+    al80_wireless_task(g_screen_busy);
+#endif
     housekeeping_task_user();
 }
 
@@ -656,6 +689,12 @@ void keyboard_post_init_kb(void) {
 
 #if defined(AL80_LCD_ENABLE)
     al80_lcd_init();
+#endif
+
+#if defined(AL80_WIRELESS_ENABLE)
+    /* USART1 for the SmartBLE coprocessor. Brought up after the LCD so SD3 wins
+     * the interrupt-priority race during boot; the radio has no timing floor. */
+    al80_wireless_init();
 #endif
 
     /* Seed the live palette mirror (EEPROM if a valid magic byte is stored,

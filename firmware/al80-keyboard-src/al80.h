@@ -8,6 +8,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <stdbool.h>
 /* For QK_KB_0 (== 0x7E00, the VIA CUSTOM(0) base) used by the keycode enum below.
  * Safe to include here: it is include-guarded and pulls only enum/macro definitions,
  * so al80.h stays self-sufficient no matter which TU includes it (al80.c after
@@ -34,7 +35,45 @@ enum al80_keycodes {
     AL80_KC_PANEL_CLOCK,                         /* 0x7E1B CUSTOM(27) -> view 0x0B + panel 0x02 */
     AL80_KC_CYCLE_TOGGLE,                        /* 0x7E1C CUSTOM(28) -> panel 0xF0 (toggle)    */
     AL80_KC_PANEL_NEXT,                          /* 0x7E1D CUSTOM(29) -> panel 0xF1 (next)      */
+
+    /* ---- wireless ----
+     * Pinned to the FACTORY numbering (KB SD5 / research/al80-feature-map.md SD7)
+     * so the stock muscle memory and any existing VIA/Studio presets keep working:
+     * CUSTOM(1..3) are BT slots 1-3 and CUSTOM(4) is the 2.4G dongle. Stock uses a
+     * dedicated KC_USB for wired; we have no such keycode here, so USB lands after
+     * the panel block rather than colliding with an unrelated factory custom.
+     * Hold-to-pair is handled in process_record_kb, not by separate keycodes. */
+    AL80_KC_BT1 = QK_KB_0 + 1,                   /* 0x7E01 CUSTOM(1)  -> BLE slot 1 */
+    AL80_KC_BT2 = QK_KB_0 + 2,                   /* 0x7E02 CUSTOM(2)  -> BLE slot 2 */
+    AL80_KC_BT3 = QK_KB_0 + 3,                   /* 0x7E03 CUSTOM(3)  -> BLE slot 3 */
+    AL80_KC_24G = QK_KB_0 + 4,                   /* 0x7E04 CUSTOM(4)  -> 2.4G dongle */
+    AL80_KC_USB = QK_KB_0 + 30,                  /* 0x7E1E CUSTOM(30) -> back to wired */
 };
+
+/* ---- wireless (al80_wireless.c) ----
+ * Mode values are the module's own 1-based numbering: 1-3 are BLE slots, 4 is
+ * the 2.4G dongle. USB is 0 and means "radio stopped, USB host driver". */
+typedef enum {
+    AL80_WL_USB = 0,
+    AL80_WL_BT1 = 1,
+    AL80_WL_BT2 = 2,
+    AL80_WL_BT3 = 3,
+    AL80_WL_24G = 4,
+} al80_wl_mode_t;
+
+/* Hold a BT/2.4G key this long to enter pairing instead of just connecting. */
+#ifndef AL80_WL_PAIR_HOLD_MS
+#    define AL80_WL_PAIR_HOLD_MS 1000
+#endif
+
+#ifdef AL80_WIRELESS_ENABLE
+void           al80_wireless_init(void);
+void           al80_wireless_task(bool screen_busy);
+void           al80_wireless_request(al80_wl_mode_t mode, bool pair);
+void           al80_wireless_battery_push(uint8_t pct);
+al80_wl_mode_t al80_wireless_mode(void);
+bool           al80_wireless_is_connected(void);
+#endif
 
 /* One palette entry: HSV hue/sat pair (value comes from user brightness). */
 typedef struct {
