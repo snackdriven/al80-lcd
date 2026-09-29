@@ -78,14 +78,33 @@ static uint32_t       last_report_time  = 0;
 static uint8_t g_wireless_request = 0;
 #    define AL80_REQ_PAIR_FLAG 0x80
 
+/* Diagnostics. The module is a black box and this is the first firmware that has
+ * ever spoken to it, so count both directions and keep the last frame seen --
+ * without this there is no way to tell "we never transmitted" from "we
+ * transmitted and it ignored us". Readable over raw HID 0x4C. */
+static uint16_t dbg_tx_bytes = 0;
+static uint16_t dbg_rx_bytes = 0;
+static uint8_t  dbg_last_rx[4] = {0, 0, 0, 0};
+
+/* If a mode switch never produces a connection, fall back to USB rather than
+ * leaving the keyboard mute. Shipping without this was a mistake: a failed
+ * switch silently killed typing with no indication and no way back except a
+ * keycode the user had to know about. */
+#    ifndef AL80_WL_CONNECT_TIMEOUT_MS
+#        define AL80_WL_CONNECT_TIMEOUT_MS 6000
+#    endif
+static uint32_t wl_switch_time = 0;
+
 /* ---- low level --------------------------------------------------------- */
 
 static inline void ble_put(uint8_t b) {
     sdPut(&SD1, b);
+    dbg_tx_bytes++;
 }
 
 static void ble_write(const uint8_t *buf, size_t len) {
     sdWrite(&SD1, buf, len);
+    dbg_tx_bytes += (uint16_t)len;
 }
 
 /* 60 zero bytes + settle. Every command that can reach a sleeping module needs
@@ -237,6 +256,11 @@ static void ble_poll_rx(void) {
 
     while ((c = sdGetTimeout(&SD1, TIME_IMMEDIATE)) != MSG_TIMEOUT) {
         uint8_t b = (uint8_t)c;
+        dbg_rx_bytes++;
+        dbg_last_rx[0] = dbg_last_rx[1];
+        dbg_last_rx[1] = dbg_last_rx[2];
+        dbg_last_rx[2] = dbg_last_rx[3];
+        dbg_last_rx[3] = b;
         if (have == 0 && b != AL80_BLE_SYNC) continue; /* resync */
         buf[have++] = b;
         if (have == 5) {
@@ -264,6 +288,20 @@ al80_wl_mode_t al80_wireless_mode(void) {
 
 bool al80_wireless_is_connected(void) {
     return wireless_connected;
+}
+
+/* Snapshot for the raw-HID diagnostic (0x4C). */
+void al80_wireless_debug(uint8_t *out) {
+    out[0] = (uint8_t)kb_mode;
+    out[1] = wireless_connected ? 1 : 0;
+    out[2] = (uint8_t)(dbg_tx_bytes >> 8);
+    out[3] = (uint8_t)(dbg_tx_bytes & 0xFF);
+    out[4] = (uint8_t)(dbg_rx_bytes >> 8);
+    out[5] = (uint8_t)(dbg_rx_bytes & 0xFF);
+    out[6] = dbg_last_rx[0];
+    out[7] = dbg_last_rx[1];
+    out[8] = dbg_last_rx[2];
+    out[9] = dbg_last_rx[3];
 }
 
 /* Called from process_record_kb. Records intent only -- the ~400ms of blocking
@@ -295,7 +333,8 @@ static void al80_wireless_apply(al80_wl_mode_t mode, bool pair) {
         ble_cmd_start(wire_mode);
     }
 
-    kb_mode = mode;
+    kb_mode        = mode;
+    wl_switch_time = timer_read32();
     if (!usb_driver) usb_driver = host_get_driver();
     host_set_driver(&wl_driver);
 }
@@ -306,6 +345,16 @@ void al80_wireless_task(bool screen_busy) {
     if (!wireless_started) return;
 
     ble_poll_rx();
+
+    /* Failsafe: a switch that never connects reverts to USB so the keyboard is
+     * never left mute. */
+    if (kb_mode != AL80_WL_USB && !wireless_connected && wl_switch_time &&
+        timer_elapsed32(wl_switch_time) > AL80_WL_CONNECT_TIMEOUT_MS) {
+        wl_switch_time = 0;
+        kb_mode        = AL80_WL_USB;
+        if (usb_driver) host_set_driver(usb_driver);
+        clear_keyboard();
+    }
 
     if (g_wireless_request && !screen_busy) {
         const uint8_t req  = g_wireless_request;

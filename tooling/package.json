@@ -1,0 +1,16 @@
+{
+  "name": "tooling",
+  "version": "1.0.0",
+  "description": "Makes the YUNZII AL80's LCD show a 12-hour clock synced to your PC. Works with the ripple-lighting firmware in place (no reflash needed).",
+  "main": "al80_clock.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "node-hid": "^3.4.0"
+  }
+}

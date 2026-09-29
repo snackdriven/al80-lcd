@@ -573,6 +573,17 @@ void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
             break;
         }
 
+#if defined(AL80_WIRELESS_ENABLE)
+        /* ---- wireless diagnostic ----
+         * [0x4C] -> [0x4C, mode, connected, tx_hi, tx_lo, rx_hi, rx_lo, last4...]
+         * The radio is a black box and this is the first firmware to talk to it,
+         * so the byte counters are the only way to tell "we never transmitted"
+         * apart from "we transmitted and it ignored us". */
+        case 0x4C:
+            al80_wireless_debug(&data[1]);
+            break;
+#endif
+
         default:
             break;
     }

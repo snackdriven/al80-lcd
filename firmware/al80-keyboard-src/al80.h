@@ -73,6 +73,7 @@ void           al80_wireless_request(al80_wl_mode_t mode, bool pair);
 void           al80_wireless_battery_push(uint8_t pct);
 al80_wl_mode_t al80_wireless_mode(void);
 bool           al80_wireless_is_connected(void);
+void           al80_wireless_debug(uint8_t *out); /* 10 bytes */
 #endif
 
 /* One palette entry: HSV hue/sat pair (value comes from user brightness). */
