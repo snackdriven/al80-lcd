@@ -44,3 +44,7 @@ The clock was just the start. Since then: still images and GIFs on the screen, a
 ## Not mine
 
 `research/site_assets/` and `firmware/YUNZII_AL80_RIPPLE.bin` are YUNZII's, kept only as reference. Their copyright.
+
+## Commits and releases
+
+See [RELEASE.md](RELEASE.md) for Commitizen commands, SemVer and changelog maintenance.
