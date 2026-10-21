@@ -103,4 +103,4 @@ Release conventions repairs recognized, same-repository Jules titles before
 the existing title validator runs. This is a fallback; create a compliant
 title directly. Existing valid titles and other contributors are unchanged.
 Check the title-policy fixtures with
-`node --test .github/tests/jules-pr-titles.test.cjs`.
+`node --test .github/tests/jules-pr-titles.check.cjs`.
