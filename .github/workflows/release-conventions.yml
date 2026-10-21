@@ -11,7 +11,56 @@ permissions:
   contents: read
 
 jobs:
+  normalize-title:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      pull-requests: write
+    outputs:
+      title: ${{ steps.title.outputs.result }}
+    steps:
+      # This job only reads PR metadata; it never checks out or runs PR code.
+      - name: Normalize Jules PR title
+        if: github.event_name == 'pull_request'
+        id: title
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          result-encoding: string
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo, pull_number: context.issue.number,
+            });
+            const conventional = /^(build|bump|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\(\S+\))?!?: [^\r\n]+$/;
+            if (conventional.test(pr.title)) return pr.title;
+            const sameRepo = pr.head.repo?.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            const jules = /^jules[-/]/i.test(pr.head.ref)
+              || /PR created automatically by Jules for task\s*\[[^\]]+\]\(https:\/\/jules\.google\.com\/task\/\d+\)/i.test(pr.body || "")
+              || pr.user.login === "google-labs-jules[bot]";
+            if (!sameRepo || !jules) return pr.title;
+            const original = pr.title;
+            let description = original.replace(/^[^\p{L}\p{N}\[]+/u, "").trim();
+            description = description.replace(/^\[(?:performance improvement|code health improvement|security improvement|testing improvement)\]\s*/i, "");
+            let title = description;
+            if (!conventional.test(title)) {
+              let type = "chore";
+              if (/⚡|performance improvement/i.test(original) || /^(optimi[sz]e|speed up)\b/i.test(description)) type = "perf";
+              else if (/🧪|testing improvement/i.test(original) || /\btests?\b/i.test(description)) type = "test";
+              else if (/🧹|code health improvement/i.test(original) || /^refactor\b/i.test(description)) type = "refactor";
+              else if (/🔒|🐛|security improvement/i.test(original) || /^fix\b/i.test(description)) type = "fix";
+              else if (/📝/.test(original) || /^(document|docs)\b/i.test(description)) type = "docs";
+              else if (/✨/.test(original)) type = "feat";
+              title = `${type}: ${description}`;
+            }
+            if (!description || !conventional.test(title)) {
+              throw new Error("Cannot normalize this Jules title; use type: description.");
+            }
+            await github.rest.pulls.update({
+              ...context.repo, pull_number: pr.number, title,
+            });
+            core.info("Normalized Jules PR title to Conventional Commits.");
+            return title;
   release-policy:
+    needs: normalize-title
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -23,10 +72,12 @@ jobs:
           python-version: '3.12'
       - name: Install Commitizen
         run: python -m pip install commitizen==4.19.2
+      - name: Test Jules title normalization
+        run: node --test .github/tests/jules-pr-titles.check.cjs
       - name: Check squash commit title
         if: github.event_name == 'pull_request'
         env:
-          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_TITLE: ${{ needs.normalize-title.outputs.title }}
         run: |
           cz check --message "$PR_TITLE"
       - name: Validate SemVer and curated changelog
