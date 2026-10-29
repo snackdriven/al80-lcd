@@ -13,10 +13,13 @@ const VID = 0x28e9, PID = 0x30af, USAGE_PAGE = 0xff60;
  * 10 min) or al80-studio can hold it for a moment. Losing that race is normal,
  * not an error worth a stack trace -- so retry briefly, then explain. */
 function openWithRetry(tries = 12, delayMs = 250) {
+  let m;
   for (let i = 0; i < tries; i++) {
-    const m = HID.devices()
-      .filter(d => d.vendorId === VID && d.productId === PID)
-      .find(d => d.usagePage === USAGE_PAGE);
+    if (!m) {
+      m = HID.devices()
+        .filter(d => d.vendorId === VID && d.productId === PID)
+        .find(d => d.usagePage === USAGE_PAGE);
+    }
     if (m) {
       try { return new HID.HID(m.path); } catch (e) { /* busy, retry */ }
     }
