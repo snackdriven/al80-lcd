@@ -202,9 +202,11 @@ function selfCheck(frame, stream) {
 // ===========================================================================
 
 function parseHexColor(hex) {
-  const m = String(hex).trim().replace(/^#/, '');
-  if (!/^[0-9a-fA-F]{6}$/.test(m)) throw new Error(`bad --pad-color "${hex}" (want #RRGGBB)`);
-  return { r: parseInt(m.slice(0, 2), 16), g: parseInt(m.slice(2, 4), 16), b: parseInt(m.slice(4, 6), 16) };
+  let s = String(hex).trim().replace(/^#/, '');
+  if (s.length === 3) s = s.split('').map(c => c + c).join('');
+  if (s.length !== 6 || !/^[0-9a-fA-F]{6}$/.test(s)) throw new Error('invalid hex color: ' + hex);
+  const val = parseInt(s, 16);
+  return [ (val >> 16) & 0xff, (val >> 8) & 0xff, val & 0xff ];
 }
 
 const FIT_MAP = { cover: 'cover', contain: 'contain', stretch: 'fill', pad: 'contain' };
@@ -220,7 +222,7 @@ async function decodeToRGB(inputPath, opts) {
   if (!fit) throw new Error(`unknown --fit "${opts.fit}"`);
 
   let img = sharp(inputPath).resize(WIDTH, HEIGHT, {
-    fit, position: 'centre', background: { r: bg.r, g: bg.g, b: bg.b, alpha: 1 },
+    fit, position: 'centre', background: { r: bg[0], g: bg[1], b: bg[2], alpha: 1 },
     kernel: 'lanczos3',
   });
 
