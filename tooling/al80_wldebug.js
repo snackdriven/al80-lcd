@@ -51,12 +51,6 @@ try {
   const pa9 = (crh >> 4) & 0xf;   // PA9 = nibble 1 of CRH
   const pa10 = (crh >> 8) & 0xf;  // PA10 = nibble 2
 
-  console.log(`mode        : ${MODES[mode] ?? mode}`);
-  console.log(`connected   : ${connected ? 'yes' : 'no'}`);
-  console.log(`bytes TX    : ${tx}   (accepted by the driver)`);
-  console.log(`bytes RX    : ${rx}`);
-  console.log(`last RX     : ${[r[7], r[8], r[9], r[10]].map(b => hex(b, 2)).join(' ')}`);
-  console.log('');
 
   /* Expected values read out of stock RIPPLE.bin. */
   const checks = [

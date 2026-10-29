@@ -1,0 +1,6 @@
+🧹 Remove debug console.log statements from al80_wldebug.js
+
+🎯 What: Removed the block of console.log statements outputting mode, connectivity, tx/rx bytes, and last RX values.
+💡 Why: These were debug outputs that added noise. Removing them improves the maintainability and cleanliness of the script.
+✅ Verification: Ran `node tooling/al80_wldebug.js` to ensure script syntax was intact and didn't crash (exits gracefully on missing hardware).
+✨ Result: Cleaner code in `tooling/al80_wldebug.js`.
