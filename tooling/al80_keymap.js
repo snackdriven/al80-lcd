@@ -46,6 +46,7 @@ const dev = open();
 try {
   if (cmd === 'read') {
     const layer = parseInt(rest[0] ?? '0', 10);
+    console.log(`layer ${layer}:`);
     for (let r = 0; r < ROWS; r++) {
       const cells = [];
       for (let c = 0; c < COLS; c++) {
