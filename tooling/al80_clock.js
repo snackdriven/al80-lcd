@@ -9,6 +9,17 @@ const SYNC_EVERY_MS = 60000;
 const LOG_FILE = path.join(__dirname, 'al80_clock.log');
 const ONCE = process.argv.includes('--once');
 
+const TOAST_PS_TEMPLATE = [
+  "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null",
+  "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)",
+  "$t = $xml.GetElementsByTagName('text')",
+  "$t.Item(0).AppendChild($xml.CreateTextNode('{{TITLE}}')) | Out-Null",
+  "$t.Item(1).AppendChild($xml.CreateTextNode('{{MESSAGE}}')) | Out-Null",
+  "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)",
+  "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AL80 Clock').Show($toast)"
+].join('; ');
+
+
 // ---- loud logging ---------------------------------------------------------
 function log(level, msg) {
   const line = '[' + new Date().toISOString() + '] ' + level + ': ' + msg;
@@ -20,15 +31,9 @@ function log(level, msg) {
 // Native Windows toast notification (works even when running hidden).
 function toast(title, message) {
   const esc = (s) => String(s).replace(/'/g, "''");
-  const ps = [
-    "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null",
-    "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)",
-    "$t = $xml.GetElementsByTagName('text')",
-    "$t.Item(0).AppendChild($xml.CreateTextNode('" + esc(title) + "')) | Out-Null",
-    "$t.Item(1).AppendChild($xml.CreateTextNode('" + esc(message) + "')) | Out-Null",
-    "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)",
-    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AL80 Clock').Show($toast)"
-  ].join('; ');
+  const ps = TOAST_PS_TEMPLATE
+    .replace('{{TITLE}}', () => esc(title))
+    .replace('{{MESSAGE}}', () => esc(message));
   exec('powershell -NoProfile -WindowStyle Hidden -Command "' + ps.replace(/"/g, '\\"') + '"',
     (err) => { if (err) log('ERROR', 'toast failed: ' + err.message); });
 }
