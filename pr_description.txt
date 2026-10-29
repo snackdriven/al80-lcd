@@ -1,3 +1,0 @@
-🎯 **What:** Added comprehensive unit tests for `crc16_modbus` and `verify` functions in `converter/al80_verify.py` using `pytest`.
-📊 **Coverage:** Covered successful dry-run scenario as well as failure cases including missing announce, missing finish, invalid CRC, invalid data block checksum, invalid lengths, invalid offsets, and frame size mismatches.
-✨ **Result:** Substantially improved test coverage of algorithmic integrity verification, offering a reliable safety net for any future refactoring of the dry-run json validator tool.
