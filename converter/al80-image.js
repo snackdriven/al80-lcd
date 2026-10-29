@@ -94,6 +94,24 @@ function packRGB565BE(rgb, opts = {}) {
 }
 
 /**
+ * Unpack a raw RGB565 BIG-ENDIAN frame (FRAME_BYTES) back to RGB888 (WIDTH*HEIGHT*3).
+ * Used for offline preview generation and testing.
+ */
+function unpackRGB565BE(frame) {
+  const px = WIDTH * HEIGHT;
+  const rgb = Buffer.alloc(px * 3);
+  for (let i = 0; i < px; i++) {
+    const v = (frame[2 * i] << 8) | frame[2 * i + 1];
+    const r5 = (v >> 11) & 0x1F, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
+    rgb[3 * i] = (r5 * 255 / 31) | 0;
+    rgb[3 * i + 1] = (g6 * 255 / 63) | 0;
+    rgb[3 * i + 2] = (b5 * 255 / 31) | 0;
+  }
+  return rgb;
+}
+
+
+/**
  * One data block from a frame offset. Returns a logical (unpadded) byte array:
  *   [0x41, offLo, offHi, len, cksumLo, cksumHi, 0x00] + 56 payload bytes  (63 bytes)
  * cksum = (0x41 + offLo + offHi + len + Sum(payload)) & 0xFFFF, stored little-endian.
@@ -249,15 +267,7 @@ async function decodeToRGB(inputPath, opts) {
 /** Write a 112x137 PNG reconstructed from the packed 565 frame (what the panel will show). */
 async function writePreview(frame, outPath) {
   const sharp = require('sharp');
-  const px = WIDTH * HEIGHT;
-  const rgb = Buffer.alloc(px * 3);
-  for (let i = 0; i < px; i++) {
-    const v = (frame[2 * i] << 8) | frame[2 * i + 1];
-    const r5 = (v >> 11) & 0x1F, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
-    rgb[3 * i] = (r5 * 255 / 31) | 0;
-    rgb[3 * i + 1] = (g6 * 255 / 63) | 0;
-    rgb[3 * i + 2] = (b5 * 255 / 31) | 0;
-  }
+  const rgb = unpackRGB565BE(frame);
   await sharp(rgb, { raw: { width: WIDTH, height: HEIGHT, channels: 3 } }).png().toFile(outPath);
 }
 
@@ -506,6 +516,7 @@ async function main() {
 module.exports = {
   WIDTH, HEIGHT, FRAME_BYTES, BLOCK, BLOCK_COUNT, ANNOUNCE, FINISH,
   packRGB565BE, buildDataBlock, buildDataBlocks, buildPacketStream,
+  unpackRGB565BE,
   padTo64, padForSend, streamToRecords, selfCheck, toHex, parseHexColor,
 };
 

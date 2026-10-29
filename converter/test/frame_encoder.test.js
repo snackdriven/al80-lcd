@@ -15,7 +15,7 @@ const { spawnSync } = require('child_process');
 
 const enc = require('../al80-image.js');
 const {
-  WIDTH, HEIGHT, FRAME_BYTES, BLOCK, BLOCK_COUNT, ANNOUNCE, FINISH,
+  WIDTH, HEIGHT, FRAME_BYTES, BLOCK, BLOCK_COUNT, ANNOUNCE, FINISH, unpackRGB565BE,
   packRGB565BE, buildPacketStream, streamToRecords, selfCheck, padTo64, padForSend, toHex,
 } = enc;
 
@@ -47,6 +47,19 @@ ok('red encodes to F8 00 big-endian (repeating)', () => {
   for (let i = 0; i < px; i++) {
     assert.strictEqual(frame[2 * i], 0xF8);
     assert.strictEqual(frame[2 * i + 1], 0x00);
+  }
+});
+
+ok("unpackRGB565BE round-trips red correctly", () => {
+  const unpacked = unpackRGB565BE(frame);
+  assert.strictEqual(unpacked.length, px * 3);
+  for (let i = 0; i < px; i++) {
+    const r = unpacked[3 * i];
+    const g = unpacked[3 * i + 1];
+    const b = unpacked[3 * i + 2];
+    assert.strictEqual(r, 255, `pixel ${i} R`);
+    assert.strictEqual(g, 0, `pixel ${i} G`);
+    assert.strictEqual(b, 0, `pixel ${i} B`);
   }
 });
 
