@@ -1,7 +1,7 @@
 const HID = require('node-hid');   // npm install node-hid
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 
 const VID = 0x28E9, PID = 0x30AF;
 const USAGE_PAGE = 0xFF60;         // raw/VIA interface, NOT the keyboard interface
@@ -29,7 +29,8 @@ function toast(title, message) {
     "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)",
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AL80 Clock').Show($toast)"
   ].join('; ');
-  exec('powershell -NoProfile -WindowStyle Hidden -Command "' + ps.replace(/"/g, '\\"') + '"',
+  const encodedCmd = Buffer.from(ps, 'utf16le').toString('base64');
+  execFile('powershell', ['-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', encodedCmd],
     (err) => { if (err) log('ERROR', 'toast failed: ' + err.message); });
 }
 
