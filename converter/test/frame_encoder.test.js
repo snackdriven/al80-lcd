@@ -179,6 +179,4 @@ if (r.error) {
 
 try { fs.unlinkSync(tmp); } catch (_) {}
 
-
-
 console.log(`\nAll ${passed} checks passed.`);

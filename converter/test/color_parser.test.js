@@ -15,36 +15,35 @@ function ok(name, fn) {
 console.log('al80-image parseHexColor test\n');
 
 ok('parseHexColor valid hex with #', () => {
-  assert.deepStrictEqual(parseHexColor('#ff0000'), [ 255, 0, 0 ]);
-  assert.deepStrictEqual(parseHexColor('#00ff00'), [ 0, 255, 0 ]);
-  assert.deepStrictEqual(parseHexColor('#0000ff'), [ 0, 0, 255 ]);
-  assert.deepStrictEqual(parseHexColor('#ffffff'), [ 255, 255, 255 ]);
-  assert.deepStrictEqual(parseHexColor('#000000'), [ 0, 0, 0 ]);
-  assert.deepStrictEqual(parseHexColor('#123456'), [ 18, 52, 86 ]);
+  assert.deepStrictEqual(parseHexColor('#ff0000'), { r: 255, g: 0, b: 0 });
+  assert.deepStrictEqual(parseHexColor('#00ff00'), { r: 0, g: 255, b: 0 });
+  assert.deepStrictEqual(parseHexColor('#0000ff'), { r: 0, g: 0, b: 255 });
+  assert.deepStrictEqual(parseHexColor('#ffffff'), { r: 255, g: 255, b: 255 });
+  assert.deepStrictEqual(parseHexColor('#000000'), { r: 0, g: 0, b: 0 });
+  assert.deepStrictEqual(parseHexColor('#123456'), { r: 18, g: 52, b: 86 });
 });
 
 ok('parseHexColor valid hex without #', () => {
-  assert.deepStrictEqual(parseHexColor('ff0000'), [ 255, 0, 0 ]);
+  assert.deepStrictEqual(parseHexColor('ff0000'), { r: 255, g: 0, b: 0 });
 });
 
 ok('parseHexColor mixed case', () => {
-  assert.deepStrictEqual(parseHexColor('#aBcDeF'), [ 171, 205, 239 ]);
+  assert.deepStrictEqual(parseHexColor('#aBcDeF'), { r: 171, g: 205, b: 239 });
 });
 
 ok('parseHexColor handles spaces in input', () => {
-  assert.deepStrictEqual(parseHexColor('  #ff0000  '), [ 255, 0, 0 ]);
+  assert.deepStrictEqual(parseHexColor('  #ff0000  '), { r: 255, g: 0, b: 0 });
 });
 
-ok('parseHexColor 3 character hex', () => {
-  assert.deepStrictEqual(parseHexColor('#fff'), [ 255, 255, 255 ]);
-  assert.deepStrictEqual(parseHexColor('f00'), [ 255, 0, 0 ]);
+ok('parseHexColor rejects shorthand outside the documented six-digit contract', () => {
+  assert.throws(() => parseHexColor('#fff'), /bad --pad-color/);
+  assert.throws(() => parseHexColor('f00'), /bad --pad-color/);
 });
 
 ok('parseHexColor invalid formats throw errors', () => {
-  assert.throws(() => parseHexColor('red'), /invalid hex color: red/);
-  assert.throws(() => parseHexColor('#ffffffff'), /invalid hex color: #ffffffff/);
-  assert.throws(() => parseHexColor(''), /invalid hex color: /);
-  assert.throws(() => parseHexColor('#gghhii'), /invalid hex color: #gghhii/);
+  for (const invalid of ['red', '#ffffffff', '', '#gghhii', '#12345', '#1234567', null, undefined]) {
+    assert.throws(() => parseHexColor(invalid), /bad --pad-color/);
+  }
 });
 
 console.log(`\nAll ${passed} checks passed.`);
