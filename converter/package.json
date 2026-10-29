@@ -7,7 +7,7 @@
   },
   "main": "al80-image.js",
   "scripts": {
-    "test": "node test/frame_encoder.test.js"
+    "test": "node test/frame_encoder.test.js && node test/color_parser.test.js"
   },
   "dependencies": {
     "node-hid": "^3.1.2",
