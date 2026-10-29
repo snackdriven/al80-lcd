@@ -67,6 +67,39 @@ ok('self-check passes (548 blocks, offsets 0..30632 step 56, 30688 bytes)', () =
   assert.strictEqual(s.totalBytes, FRAME_BYTES);
 });
 
+ok('self-check throws on invalid frame length', () => {
+  const badFrame = Buffer.alloc(FRAME_BYTES - 1);
+  assert.throws(() => {
+    selfCheck(badFrame, stream);
+  }, /frame length .* !=/);
+});
+
+ok('self-check throws on invalid block count', () => {
+  const badStream = [stream[0], ...stream.slice(2)]; // Drop first block
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /block count .* !=/);
+});
+
+ok('self-check throws on invalid announce constant', () => {
+  const badStream = [...stream];
+  badStream[0] = [...badStream[0]]; // copy
+  badStream[0][0] = 0x99;
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /announce != constant/);
+});
+
+ok('self-check throws on invalid finish constant', () => {
+  const badStream = [...stream];
+  const last = badStream.length - 1;
+  badStream[last] = [...badStream[last]]; // copy
+  badStream[last][0] = 0x99;
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /finish != constant/);
+});
+
 ok('every block: 63 logical bytes, len 56, checksum recomputes', () => {
   const blocks = stream.slice(1, -1);
   let expOff = 0;
