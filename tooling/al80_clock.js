@@ -14,7 +14,7 @@ function log(level, msg) {
   const line = '[' + new Date().toISOString() + '] ' + level + ': ' + msg;
   if (level === 'ERROR') console.error(line);
   else console.log(line);
-  try { fs.appendFileSync(LOG_FILE, line + '\n'); } catch (_) {}
+  fs.appendFile(LOG_FILE, line + '\n', () => {});
 }
 
 // Native Windows toast notification (works even when running hidden).
