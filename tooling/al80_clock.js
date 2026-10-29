@@ -19,17 +19,22 @@ function log(level, msg) {
 
 // Native Windows toast notification (works even when running hidden).
 function toast(title, message) {
-  const esc = (s) => String(s).replace(/'/g, "''");
+  const b64Title = Buffer.from(String(title), 'utf-8').toString('base64');
+  const b64Msg = Buffer.from(String(message), 'utf-8').toString('base64');
   const ps = [
     "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null",
     "$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)",
     "$t = $xml.GetElementsByTagName('text')",
-    "$t.Item(0).AppendChild($xml.CreateTextNode('" + esc(title) + "')) | Out-Null",
-    "$t.Item(1).AppendChild($xml.CreateTextNode('" + esc(message) + "')) | Out-Null",
+    `$title = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64Title}'))`,
+    `$msg = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${b64Msg}'))`,
+    "$t.Item(0).AppendChild($xml.CreateTextNode($title)) | Out-Null",
+    "$t.Item(1).AppendChild($xml.CreateTextNode($msg)) | Out-Null",
     "$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)",
     "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AL80 Clock').Show($toast)"
   ].join('; ');
-  exec('powershell -NoProfile -WindowStyle Hidden -Command "' + ps.replace(/"/g, '\\"') + '"',
+
+  const encodedCommand = Buffer.from(ps, 'utf-16le').toString('base64');
+  exec('powershell -NoProfile -WindowStyle Hidden -EncodedCommand ' + encodedCommand,
     (err) => { if (err) log('ERROR', 'toast failed: ' + err.message); });
 }
 
