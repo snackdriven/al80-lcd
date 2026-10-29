@@ -48,11 +48,12 @@ try {
     const layer = parseInt(rest[0] ?? '0', 10);
     console.log(`layer ${layer}:`);
     for (let r = 0; r < ROWS; r++) {
-      const cells = [];
+      let line = `  row ${r}:`;
       for (let c = 0; c < COLS; c++) {
-        cells.push('0x' + getKeycode(dev, layer, r, c).toString(16).padStart(4, '0'));
+        const hex = getKeycode(dev, layer, r, c).toString(16);
+        line += hex.length === 4 ? ' 0x' + hex : hex.length === 3 ? ' 0x0' + hex : hex.length === 2 ? ' 0x00' + hex : hex.length === 1 ? ' 0x000' + hex : ' 0x0000';
       }
-      console.log(`  row ${r}: ${cells.join(' ')}`);
+      console.log(line);
     }
   } else if (cmd === 'set') {
     const [layer, row, col, kcs] = rest;
