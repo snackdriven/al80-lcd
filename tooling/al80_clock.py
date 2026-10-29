@@ -20,18 +20,28 @@ def log(level, msg):
     except Exception:
         pass
 
+import base64
+
 def toast(title, message):
+    b64_title = base64.b64encode(title.encode('utf-8')).decode('utf-8')
+    b64_msg = base64.b64encode(message.encode('utf-8')).decode('utf-8')
+
     ps = (
         "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null; "
         "$xml=[Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
         "$t=$xml.GetElementsByTagName('text'); "
-        "$t.Item(0).AppendChild($xml.CreateTextNode('%s'))|Out-Null; "
-        "$t.Item(1).AppendChild($xml.CreateTextNode('%s'))|Out-Null; "
+        f"$title=[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_title}')); "
+        f"$msg=[System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{b64_msg}')); "
+        "$t.Item(0).AppendChild($xml.CreateTextNode($title))|Out-Null; "
+        "$t.Item(1).AppendChild($xml.CreateTextNode($msg))|Out-Null; "
         "$toast=[Windows.UI.Notifications.ToastNotification]::new($xml); "
         "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('AL80 Clock').Show($toast)"
-    ) % (title.replace("'", "''"), message.replace("'", "''"))
+    )
+
+    encoded_command = base64.b64encode(ps.encode('utf-16le')).decode('utf-8')
+
     try:
-        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps])
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-EncodedCommand", encoded_command])
     except Exception as e:
         log("ERROR", "toast failed: %s" % e)
 
