@@ -15,7 +15,7 @@ const { spawnSync } = require('child_process');
 
 const enc = require('../al80-image.js');
 const {
-  WIDTH, HEIGHT, FRAME_BYTES, BLOCK, BLOCK_COUNT, ANNOUNCE, FINISH,
+  WIDTH, HEIGHT, FRAME_BYTES, BLOCK, BLOCK_COUNT, ANNOUNCE, FINISH, unpackRGB565BE,
   packRGB565BE, buildPacketStream, streamToRecords, selfCheck, padTo64, padForSend, toHex,
 } = enc;
 
@@ -50,6 +50,19 @@ ok('red encodes to F8 00 big-endian (repeating)', () => {
   }
 });
 
+ok("unpackRGB565BE round-trips red correctly", () => {
+  const unpacked = unpackRGB565BE(frame);
+  assert.strictEqual(unpacked.length, px * 3);
+  for (let i = 0; i < px; i++) {
+    const r = unpacked[3 * i];
+    const g = unpacked[3 * i + 1];
+    const b = unpacked[3 * i + 2];
+    assert.strictEqual(r, 255, `pixel ${i} R`);
+    assert.strictEqual(g, 0, `pixel ${i} G`);
+    assert.strictEqual(b, 0, `pixel ${i} B`);
+  }
+});
+
 const stream = buildPacketStream(frame);
 
 ok('stream = announce + 548 blocks + finish', () => {
@@ -65,6 +78,39 @@ ok('self-check passes (548 blocks, offsets 0..30632 step 56, 30688 bytes)', () =
   assert.strictEqual(s.lastOffset, 30632);
   assert.strictEqual(s.step, 56);
   assert.strictEqual(s.totalBytes, FRAME_BYTES);
+});
+
+ok('self-check throws on invalid frame length', () => {
+  const badFrame = Buffer.alloc(FRAME_BYTES - 1);
+  assert.throws(() => {
+    selfCheck(badFrame, stream);
+  }, /frame length .* !=/);
+});
+
+ok('self-check throws on invalid block count', () => {
+  const badStream = [stream[0], ...stream.slice(2)]; // Drop first block
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /block count .* !=/);
+});
+
+ok('self-check throws on invalid announce constant', () => {
+  const badStream = [...stream];
+  badStream[0] = [...badStream[0]]; // copy
+  badStream[0][0] = 0x99;
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /announce != constant/);
+});
+
+ok('self-check throws on invalid finish constant', () => {
+  const badStream = [...stream];
+  const last = badStream.length - 1;
+  badStream[last] = [...badStream[last]]; // copy
+  badStream[last][0] = 0x99;
+  assert.throws(() => {
+    selfCheck(frame, badStream);
+  }, /finish != constant/);
 });
 
 ok('every block: 63 logical bytes, len 56, checksum recomputes', () => {
