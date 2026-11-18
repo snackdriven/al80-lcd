@@ -1,29 +1,31 @@
 ---
 title: Safety / do-not-touch
 status: reference
+type: reference
 scope: Brick risks, the DFU sequence to avoid, and the single-opener rule
 ---
 
 # Safety / do-not-touch
 
-This page gives the brick risks, the DFU sequence to avoid, and the single-opener rule.
+Read this page before you send commands to the keyboard or flash firmware. It gives the brick
+risks, the DFU sequence to avoid, and the single-opener rule.
 
 !!! danger "Never send 0xB0–0xB7"
-    Do **not** send or experiment with commands `0xB0–0xB7`. These are bootloader /
-    firmware-upgrade (DFU) commands. They can brick the keyboard or erase the firmware. Send only
-    `0x40/0x41/0x42`.
+    Do **not** send commands `0xB0–0xB7`. Do **not** experiment with these commands. They can
+    brick the keyboard or erase the firmware. These are bootloader / firmware-upgrade (DFU)
+    commands. Send only `0x40/0x41/0x42`.
 
 ## ⚠️ Rules
 
-- **Never reflash carelessly.** The ripple lighting firmware is the full reason for the VIA-only
-  and HID-script approach. Custom-QMK bins in `firmware/` replace it. Thus, flash only on purpose
-  and with care (see [Custom QMK](../firmware/custom-qmk.md)).
-- **Only one opener** of the `0xFF60` interface at a time. Close the browser tab (and VIA) before
-  you run scripts.
+- **Do not reflash carelessly.** Custom-QMK bins in `firmware/` replace the ripple lighting
+  firmware. The ripple firmware is the full reason for the VIA-only and HID-script approach. Flash
+  only on purpose and with care (see [Custom QMK](../firmware/custom-qmk.md)).
+- **Use only one opener.** Only one process can open the `0xFF60` interface at a time. Close the
+  browser tab and VIA before you run scripts.
 
 ## ❌ The exact DFU sequence to avoid
 
-This sequence was decoded from source. A firmware update sends this sequence. Never send it
+We decoded this sequence from source. A firmware update sends this sequence. Do **not** send it
 manually:
 
     0xB1 toBootLoader

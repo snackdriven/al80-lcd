@@ -1,34 +1,37 @@
 ---
 title: Protocol overview & HID framing
 status: confirmed
+type: explanation
 scope: HID transport, the 0x40/0x41/0x42 packet roles, and the fully-framed announce header
 ---
 
 # Protocol overview & HID framing
 
-The AL80 LCD is controlled through one HID interface (`0xFF60`, usage `0x61`, VID `0x28E9` / PID
-`0x30AF`). Each screen operation is a **three-packet sequence**:
-
-    0x40 announce  →  0x41 data (one or many)  →  0x42 finish
-
-The reports are 64 bytes, with report ID `0`. The keyboard MCU does not render pixels. It sends the
-report body to a separate smart display module over USART3. The display module runs its own `PK_*`
-command set (see [Display commit (PK_*)](display-commit.md)).
+This page explains how the AL80 talks to its LCD: one HID interface, three packet roles, and one shared header.
 
 !!! tip "TL;DR"
 
     - Each screen operation is a **three-packet sequence**: `0x40` announce → `0x41` data → `0x42` finish.
-    - On the `0xFF60/0x61` interface, the screen commands are `0x40/0x41/0x42`. The vendor commands `0x55` and `0xB0` return a NAK. Never probe `0xB1–0xB7` (brick risk).
+    - On the `0xFF60/0x61` interface, the screen commands are `0x40/0x41/0x42`. The vendor commands `0x55` and `0xB0` return a NAK. **Do not** probe `0xB1–0xB7`. They can brick the keyboard.
     - The device **ACKs each packet**: it echoes the packet with `byte[6] = 0x55`.
 
+You control the AL80 LCD through one [HID](../reference/glossary.md) interface (`0xFF60`, usage
+`0x61`, VID `0x28E9` / PID `0x30AF`). Every screen operation is a **three-packet sequence**:
+
+    0x40 announce  →  0x41 data (one or many)  →  0x42 finish
+
+Reports are 64 bytes, with report ID `0`. The keyboard's microcontroller (MCU) doesn't draw pixels
+itself. It passes the report body to a separate smart display module over a serial link, USART3. That
+module runs its own `PK_*` command set (see [Display commit (PK_*)](display-commit.md)).
+
 !!! note "Two protocols, one interface"
-    The same `0xFF60/0x61` interface also uses the **VIA** protocol (usevia.app uses it for keymap/lighting).
-    The VIA opcodes are in the range `0x01–0x15`. The LCD screen opcodes (`0x40/0x41/0x42`) are above this range.
-    This is why one interface serves both protocols. It is also why only **one process** can hold the interface at a time.
+    The same `0xFF60/0x61` interface also carries the **VIA** protocol, which usevia.app uses for keymap and lighting.
+    VIA opcodes sit in the range `0x01–0x15`, and the LCD screen opcodes (`0x40/0x41/0x42`) sit above it.
+    That's how one interface serves both protocols. It is also why only **one process** can hold the interface at a time.
 
 ## 📦 Screen-control command set
 
-The command byte (`byte[0]`) values come from the JS bundle of the vendor site:
+The command byte (`byte[0]`) values come from the vendor site's JS bundle:
 
 | Byte | Name (from JS) | Meaning |
 |---|---|---|
@@ -37,25 +40,28 @@ The command byte (`byte[0]`) values come from the JS bundle of the vendor site:
 | `0x42` | finishScreenControlDataPacket | "finish" / commit packet |
 | `0x55` | getDongleAndKeyboardStatus | status query (NAKs on the LCD interface) |
 | `0xB0` | getFirmwareVersion | returns `0xFF` = NAK on the LCD interface |
-| `0xB1..0xB7` | bootloader / firmware upgrade | DFU flow. **Dangerous: do not use** (see [Safety](../reference/safety.md)) |
+| `0xB1..0xB7` | bootloader / firmware upgrade | [DFU](../reference/glossary.md) flow. **Do not use.** It is dangerous (see [Safety](../reference/safety.md)). |
 
-**Command-sweep finding (read-only probe):** On the `0xFF60` LCD interface, the vendor commands `0x55`
-and `0xB0` both returned `FF 00 00 …` (NAK). Only `0x40/0x41/0x42` work for the screen. The VIA
-opcodes `0x01–0x15` also work on this interface (see the note above). The sweep did not test other opcodes.
-The status, version, and config commands are on a different interface (probably `0xFF31`).
-Do **not** probe `0xB1–0xB7`: brick risk.
+**Command-sweep finding (read-only probe):** on the `0xFF60` LCD interface, the vendor commands `0x55`
+and `0xB0` both returned `FF 00 00 …` (a [NAK](../reference/glossary.md)). Only `0x40/0x41/0x42` work
+for the screen. The VIA opcodes `0x01–0x15` also work on this interface (see the note above). The sweep
+didn't test any other opcodes. The status, version and config commands live on a different interface,
+probably `0xFF31`.
+
+**Do not** probe `0xB1–0xB7`. They can brick the keyboard.
 
 ## ✅ ACK behavior
 
-The device echoes each packet on the input report with **`byte[6] = 0x55`** as an
-acknowledgment. Send `40 00 00 07 f6 02 00 …` and you receive `40 00 00 07 f6 02 55 …`. This echo
-confirmed that the writes arrived, also when the LCD showed no visible change. Reliable picture
-uploads ACK-gate on this echo. See [Chunking & pacing](chunking-and-pacing.md).
+The device echoes every packet back on the input report with **`byte[6] = 0x55`**. That echo is the
+acknowledgment ([ACK](../reference/glossary.md)). Send `40 00 00 07 f6 02 00 …` and you get back
+`40 00 00 07 f6 02 55 …`. The echo proved that writes were arriving even when the LCD showed no
+change. Reliable picture uploads are ACK-gated: they wait for this echo before sending the next
+block. See [Chunking & pacing](chunking-and-pacing.md).
 
 ## 📦 The 0x40 announce header, fully framed
 
-Each operation starts with the same header layout. This layout is confirmed across 3,460 captured
-packets (only `0x40/0x41/0x42` occur):
+Every operation starts with the same header layout. It's confirmed across 3,460 captured packets
+(only `0x40/0x41/0x42` appear in them):
 
     40 00 00 07 [c4 c5] 00 A5 5A [type] [param] [subcmd] [crc16:2]
 
@@ -84,7 +90,7 @@ Example: the time announce (`byte[9]=0x09`):
 
 ## 📖 Where to go next
 
-- [Checksums & CRC](checksums.md): the `yne` additive checksum and CRC16-MODBUS. Both are cracked.
+- [Checksums & CRC](checksums.md): the `yne` additive checksum and CRC16-MODBUS. Both are fully decoded.
 - [Time & Date sync](time-and-date.md): the clock protocol that works, and the 12-hour hack.
 - [Still images](still-images.md) / [GIF / animation](gif-animation.md): the pixel upload formats.
 - [Display commit (PK_*)](display-commit.md): how the module *shows* the data that you upload.

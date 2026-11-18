@@ -1,25 +1,28 @@
 ---
 title: GIF / animation
 status: confirmed
+type: reference
 scope: The banked GIF wire format, the MODE byte, per-frame headers, banking, FPS and frame count
 ---
 
 # GIF / animation
 
-The GIF upload uses one wire format. This format has:
+Use this page to look up the GIF upload format: modes, packet structure, frame headers, banking, FPS, frame count and pacing.
+
+!!! tip "TL;DR"
+
+    - There are three modes (startup / GIF page / main page). The **MODE byte** in each packet selects the mode.
+    - The pixel data goes in **1024-byte banks** (18×56 + 1×16 blocks). The offset **resets for each bank**, and the device advances banks implicitly.
+    - **Send pacing is mandatory.** If you remove the pacing or the per-frame index, the GIF renders white or garbage.
+
+Every GIF upload uses the same wire format. It has:
 
 - A **MODE byte** in each packet.
 - Three modes.
 - Banked 1 KB pixel windows.
 - Mandatory send pacing.
 
-The frames are sent in sequence.
-
-!!! tip "TL;DR"
-
-    - There are three modes (startup / GIF page / main page). The **MODE byte** in each packet selects the mode.
-    - The pixel data goes in **1024-byte banks** (18×56 + 1×16 blocks). The offset **resets for each bank**, and the device advances banks implicitly.
-    - **Send pacing is MANDATORY.** If you remove the pacing or the per-frame index, the GIF renders white/garbage.
+Frames are sent one after another.
 
 ## 🎞️ Modes
 
@@ -46,7 +49,7 @@ The frames are sent in sequence.
 The **frame index is the 10th payload byte** (header length byte = `0x0A` = 10). It increments
 0, 1, 2, …
 
-!!! warning "If you remove the frame index, the GIF renders WHITE"
+!!! warning "If you remove the frame index, the GIF renders white"
     If you send only `[0x02, mode]`, each frame index is 0, and the frames overwrite each other.
     This was a real bug. The checksum gives byte verification: mode-2 frame 0 header
     `… 04 30 02 02 00` → cksum `0x95`; frame 1 `… 04 30 02 02 01` → cksum `0x96` (base + N).
@@ -76,19 +79,25 @@ packets:
 - **FPS** = the trailing byte of the type-`0x13` finish packet (UI slider **1–60**, default **30**).
 - **FRAME COUNT** = the trailing byte of the type-`0x12` finish packet (capped 64/160/42 by mode).
 
-Both values are single bytes. They are sent at the end of the transfer.
+Both values are single bytes, sent at the end of the transfer.
 
-## ⚠️ Send pacing is MANDATORY (this was the killer bug)
+## ⚠️ Send pacing is mandatory (the bug that broke GIFs)
 
-The device needs time to commit each bank. If you send the banks back-to-back, they overwrite each
-other and the GIF renders as garbage bars. The captured bytes of the vendor also fail if you send
-them at full speed. The `Ur` send routine of the vendor uses this pacing:
+The device needs time to commit each bank. If you send the banks with no pause between them, they
+overwrite each other. The GIF then renders as garbage bars. The captured bytes of the vendor also
+fail if you send them at full speed.
 
-- **30 ms** after the initial setup.
-- **Per frame:** send the header, then `sleep(frameIndex % 16 === 0 ? 3000 : 30)` (a **3-second
-  pause** after frame 0 and every 16th frame, else 30 ms). Then send the length. Then send the
-  frame data in 1024-byte banks, with **30 ms after each bank**.
-- **30 ms** after each finish setup.
+To pace a GIF upload, use the pacing of the vendor `Ur` send routine:
+
+1. Send the initial setup. Wait **30 ms**.
+2. For each frame, send the header. Then wait `sleep(frameIndex % 16 === 0 ? 3000 : 30)`.
+
+    This is a **3-second pause** after frame 0 and after every 16th frame. For other frames, it is 30 ms.
+
+3. Send the length.
+4. Send the frame data in 1024-byte banks. Wait **30 ms** after each bank.
+5. Do steps 2–4 again for each frame.
+6. Send each finish setup. Wait **30 ms** after each finish setup.
 
 Still images need no per-bank pacing, because they have no banks. They still need the 300 ms / 30 ms
 settles (see [Display commit](display-commit.md)). Confirmed on the device: with this
@@ -97,7 +106,7 @@ white flash** is a firmware trait of this full panel family. It is not a bug in 
 [Chunking & pacing](chunking-and-pacing.md).
 
 !!! note "Capture vs source variant"
-    The vendor web component sends GIF control subcmds `0x02/0x03`. The GIF *capture* of this repo
+    The vendor web component sends GIF control subcmds `0x02/0x03`. This repo's GIF *capture*
     showed setup subcmds `0x09/0x0A/0x07` with the banked 1 KB windows. The bundle has several
-    product code paths. The captured device is ground truth for *this* keyboard. Before you forge
-    GIFs, compare the two variants with a fresh capture.
+    product code paths, and the captured device is the authority for *this* keyboard. Before you
+    build GIFs by hand, compare the two variants against a fresh capture.

@@ -1,22 +1,25 @@
 ---
 title: Research notes
 status: index
+type: reference
 scope: Index of the dated research notes, playbooks, and investigations in research/
 ---
 
 # Research notes
 
-The `research/` directory in the repo holds the raw, dated investigation notes, playbooks, SPARC
-plans, and capture tooling. The reference pages come from these files. This page is the index. The
-files stay in `research/` and are not copied here. Thus the wiki reference pages stay the curated
-version, with the important data first.
+Use this page to find the raw research file behind a wiki page.
+
+The repo's `research/` directory holds the raw, dated investigation notes, playbooks, SPARC plans,
+and capture tooling. The wiki's reference pages are built from these files. This page only lists
+them: the files stay in `research/` and aren't copied here. That way the wiki pages stay the
+curated version, with the important data first.
 
 ## 🔧 Investigations & playbooks
 
 | File | What it is |
 |---|---|
-| `research/2026-07-02-picture-page-banding-investigation.md` | The overnight banding investigation. It proposed the parity-slip theory, which was retired later (see [History](history/changelog.md)). |
-| `research/2026-07-03-overnight-custom-qmk-summary.md` | The custom QMK build session: compiled GREEN, keys+RGB, editable presets |
+| `research/2026-07-02-picture-page-banding-investigation.md` | The overnight banding investigation. It proposed the parity-slip theory, which was later retired (see [History](history/changelog.md)). |
+| `research/2026-07-03-overnight-custom-qmk-summary.md` | The custom QMK build session: compiled **green**, keys+RGB, editable presets |
 | `research/custom-qmk-lcd-port-plan.md` | The verdict that LCD-on-custom is portable from source (C9 enable), with no logic analyzer |
 | `research/al80-lcd-morning-playbook.md` | Morning playbook: the status of the custom firmware (enable/baud confirmed) |
 | `research/al80-lcd-on-custom-logic-analyzer-plan.md` | The logic-analyzer plan for the screen forwarding (now superseded) |
@@ -29,7 +32,7 @@ version, with the important data first.
 
 | File | What it is |
 |---|---|
-| `research/al80-dreams-roadmap.md` | Ideas that are based on the confirmed limits |
+| `research/al80-dreams-roadmap.md` | Ideas based on the confirmed limits |
 | `research/al80-always-on-host-SPARC.md` | A resident host that owns the LCD HID interface |
 | `research/al80-nowplaying-webhooks-SPARC.md` | The design for now-playing + webhook alerts (shipped: now-playing) |
 
@@ -45,7 +48,6 @@ version, with the important data first.
 
 - **`al80-studio`** (sibling repo): the WebHID control panel that drives all of this. `src/protocol.js`
   is the pure packet builder, with unit tests. `host/nowplaying-run.mjs` is the Spotify host.
-- **`AL80_KNOWLEDGE_BASE.md`** (repo root): the canonical single-file KB. This wiki puts its content
-  into sections.
-- **`docs/llm-friendly-documentation-2026.md`**: the documentation philosophy that this wiki
-  follows.
+- **`AL80_KNOWLEDGE_BASE.md`** (repo root): the canonical single-file KB (knowledge base). This
+  wiki splits it into sections.
+- **`docs/llm-friendly-documentation-2026.md`**: the documentation approach this wiki follows.

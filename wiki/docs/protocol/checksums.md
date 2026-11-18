@@ -1,20 +1,23 @@
 ---
 title: Checksums & CRC
 status: confirmed
+type: reference
 scope: The yne additive checksum (bytes[4,5]) and the CRC16-MODBUS announce CRC (bytes[12,13])
 ---
 
 # Checksums & CRC
 
-There are two integrity fields. Both are cracked and verified in this repo. One additive checksum
-rule applies to every packet (announce and data packets). The announces also carry a CRC16-MODBUS
-over the type triple.
+Use this page to look up the two integrity fields in AL80 packets and how to compute each one.
 
 !!! tip "TL;DR"
 
     - **One additive checksum (`yne`) applies to every packet**: `bytes[4,5]` = `(Σ all bytes, field held 0) & 0xFFFF`, stored little-endian.
     - Announces **also** carry a **CRC16-MODBUS** (`ga`) over `bytes[9..11]`, stored big-endian at `bytes[12,13]`.
     - The additive rule was verified against **4288/4288** archived data blocks. The old "seed 121 / += 56 accumulator" model is wrong.
+
+Both fields are fully decoded and verified in this repo. One additive checksum rule
+([`yne`](../reference/glossary.md)) covers every packet, announce and data alike. Announces also
+carry a CRC16-MODBUS over the type triple.
 
 ## 🧮 Announce CRC16 (bytes[12,13]) = CRC16-MODBUS
 
@@ -46,8 +49,8 @@ ga = (bytes) => {              // input = [type, param, subcmd]
 
     bytes[4,5] (16-bit LITTLE-ENDIAN) = ( 0x41 + offLo + offHi + len + Σpayload ) & 0xFFFF
 
-This is a 16-bit additive checksum over the full 64-byte packet. It does not include the checksum
-field (`bytes[4,5]`) or the zero pad. This rule was verified against each image data block in the
+It's a 16-bit additive checksum over the full 64-byte packet, leaving out the checksum field
+(`bytes[4,5]`) and the zero pad. This rule was checked against every image data block in the
 archived captures: **1096/1096 still + 3192/3192 GIF = 4288/4288 exact matches**
 (`research/analyze_captures.py`).
 
@@ -59,18 +62,18 @@ archived captures: **1096/1096 still + 3192/3192 GIF = 4288/4288 exact matches**
 
 ## ✅ One rule for every packet
 
-The builder calculates `bytes[4,5]` with `yne()` for all opcodes, for announce and data packets:
+The builder computes `bytes[4,5]` with `yne()` for every opcode, announce and data packets alike:
 
     yne(o) = ( Σ o[i] ) & 0xFFFF, stored little-endian at o[4],o[5]   (o[4],o[5] held 0 while summing)
 
-Thus the announce `bytes[4,5]` is the same checksum. (For a long time, it was thought to be a
+So the announce `bytes[4,5]` is the same checksum. (For a long time it was thought to be a
 "per-command constant.") The homepage announce `[40,0,0,07,0,0,0,A5,5A,0B,0,0,02,00]` sums to
-**339 = 0x0153** → bytes `53 01`. This agrees with the capture. The old "per-command constants"
-(homepage 339, picture 566, GIF 601, time 758) were only `yne()` of each packet.
+**339 = 0x0153** → bytes `53 01`, which matches the capture. The old "per-command constants"
+(homepage 339, picture 566, GIF 601, time 758) were just `yne()` of each packet.
 
 ## 📖 Source: the one-function packet builder
 
-The full protocol was derived again from `research/site_assets/index-8Bj3uPPc.js`. One function
+The full protocol was re-derived from `research/site_assets/index-8Bj3uPPc.js`. One function
 builds every packet:
 
 ```js
@@ -86,5 +89,5 @@ Bn = (t, n, r = ["00","00"], i = 63) => {
 - `ga`, CRC16-MODBUS (init `0xFFFF`, poly `0xA001`, big-endian) over `[type,param,subcmd]`, at
   `bytes[12,13]` of announces.
 
-The one-byte form of the time-data checksum is only the low byte of this rule:
+The one-byte form of the time-data checksum is just the low byte of this rule:
 `CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF` (see [Time & Date sync](time-and-date.md)).

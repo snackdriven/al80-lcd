@@ -1,25 +1,20 @@
 ---
 title: Full byte-map reference
 status: confirmed
+type: reference
 scope: Source-decoded command map, still/GIF upload byte-maps, view-switch and clear commands
 ---
 
 # Full byte-map reference
 
-This page was cross-checked against two independent front-ends:
-
-- The **web app** JS bundle (`research/site_assets/index-8Bj3uPPc.js`).
-- The **desktop app** (`MK856.exe`). This is a Qt5 native app. Its export/RTTI symbols name each
-  routine: `HidWriteLCDHead/Data/EndInfo` = 0x40/0x41/0x42,
-  `WriteDeviceLCDPicture/Gif/GifHead/GifEnd/GIFFrameRate/Time/Date`.
-
-Both front-ends use the identical HID protocol.
+Use this page to look up the AL80 command map and the byte-maps for still images, GIFs, view switches and clears.
 
 !!! tip "TL;DR"
 
     - This data is decoded from the source of two front-ends (web JS bundle + `MK856.exe`). `0x40/0x41/0x42` = announce/data/finish.
     - This protocol has **no battery %**. `0x55` decodes only a sleep bit.
-    - The view-switch `PK_*` commands have real semantics (`0x0D` advances slots: do not send it after an upload). This page documents the `0xB0-0xB7` DFU sequence only so that you can **AVOID** it.
+    - The view-switch `PK_*` commands do real work. `0x0D` advances slots, so don't send it after an upload.
+    - **Do not** send the `0xB0-0xB7` DFU sequence. This page documents it only so that you can avoid it.
 
 ## 📖 Command map (AL80 uses the `GamingKeyboard2` opcode profile)
 
@@ -31,9 +26,9 @@ Both front-ends use the identical HID protocol.
     0x55 getDongleAndKeyboardStatus · 0xB0-0xB7 firmware/DFU (see Safety)
 
 `getDongleAndKeyboardStatus (0x55)` decodes **only a sleep bit** (`hasSleep = !response[7]`).
-The name suggests more, but this protocol has **no battery %**. The per-radio backlight/sleep
-timers (wired/2.4G/BT) are in the device-config blob at byte offsets 23 / 15,17 / 19,21. They are
-not opcodes.
+Despite the name, this protocol has **no battery %**. The per-radio backlight and sleep timers
+(wired/2.4G/BT) live in the device-config blob at byte offsets 23 / 15,17 / 19,21. They aren't
+opcodes.
 
 ## 🖼️ Still-image upload (type 0x10) — full byte-map
 
@@ -42,8 +37,8 @@ not opcodes.
     pixels   (0x41):  RGB565 big-endian bytes, auto-chunked (see Chunking)
     finish   (0x42):  (empty)
 
-The RGB565 value is packed as `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` from a canvas that was resized with
-`imageSmoothingEnabled=false`. Each value is split high byte first (`v>>8`, `v&255`).
+Each [RGB565](../reference/glossary.md) value is packed as `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` from a
+canvas resized with `imageSmoothingEnabled=false`. Each value goes out high byte first (`v>>8`, `v&255`).
 
 ## 🎞️ GIF upload (types 0x12/0x13) — frame-count + FPS
 
@@ -63,17 +58,17 @@ The RGB565 value is packed as `((R>>3)<<11)|((G>>2)<<5)|(B>>3)` from a canvas th
 
 ## 📟 View-switch and clear commands (from source)
 
-These `PK_*` commands have real semantics: they are not neutral page toggles. See
+These `PK_*` commands do real work. They aren't neutral page toggles. See
 [Display commit (PK_*)](display-commit.md).
 
 | Command | type `byte[9]` | subcmd `byte[11]` | Notes |
 |---|---|---|---|
 | Switch to homepage (clock) | `0x0B` | 0 | `PK_GO_HOME` |
-| Switch to picture page | `0x0D` | 0 | `PK_TOGGLE_PIC`. **Advances to the next slot.** Do NOT send it after an upload. |
+| Switch to picture page | `0x0D` | 0 | `PK_TOGGLE_PIC`. **Advances to the next slot.** **Do not** send it after an upload. |
 | Switch to GIF page | `0x0F` | 0 | `PK_GO_GIF` |
 | Update device time | `0x09` | 3 | payload `[H,M,S]` |
 | Update device date | `0x0A` | 4 | payload `[YY,DOW,MM,DD]` |
-| Clear picture | `0x0E` | — | sent **16×** (one time for each image slot) |
+| Clear picture | `0x0E` | — | sent **16×** (once for each image slot) |
 | Clear GIF | `0x12` sub 1 → `0x13` sub 2 | — | two announces |
 
 The announce CRC16-MODBUS rule is general. It was verified on 5 different commands (homepage
@@ -86,9 +81,19 @@ The announce CRC16-MODBUS rule is general. It was verified on 5 different comman
     keycodes are `CUSTOM(22)=0x7E16 HOME` (Fn+9), `CUSTOM(23)=0x7E17 PICTURE` (Fn+8),
     `CUSTOM(24)=0x7E18 GIF` (Fn+0).
 
-## ⚠️ DFU / firmware-upgrade sequence (documented to AVOID)
+## ⚠️ DFU / firmware-upgrade sequence (documented to avoid)
 
 See [Safety / do-not-touch](../reference/safety.md). This sequence is decoded from source:
 `0xB1 toBootLoader` → poll `0xB2 getBootLoaderStatus` → `0xB3 confirmFirmwareInfo` (56-byte header,
 size LE @ `[6..9]`, CRC32 LE @ `[10..13]`) → `0xB4 startUpgrade` → `0xB5 transferUpgradeData` →
 `0xB6 upgradeComplete` → `0xB7 endUpgrade`. **Never send this sequence.**
+
+??? note "Where this data comes from"
+    This page was cross-checked against two independent front-ends:
+
+    - The **web app** JS bundle (`research/site_assets/index-8Bj3uPPc.js`).
+    - The **desktop app** (`MK856.exe`), a native Qt5 app. Its export/RTTI symbols name each
+      routine: `HidWriteLCDHead/Data/EndInfo` = 0x40/0x41/0x42,
+      `WriteDeviceLCDPicture/Gif/GifHead/GifEnd/GIFFrameRate/Time/Date`.
+
+    Both front-ends use the identical HID protocol.
