@@ -29,7 +29,8 @@ Every page opens (after the title) with one sentence saying what it's for, in th
 "Use this page to flash custom firmware" or "This page explains why frames band." The TL;DR box, if
 any, comes right after.
 
-**Current gap:** there's no tutorial. A "your first custom frame" tutorial would be the natural one.
+The one tutorial is [Your first custom frame](docs/tutorials/first-custom-frame.md): stock firmware,
+AL80 Studio, no flashing. Keep tutorials on a single safe path like that one.
 
 ## 2. Plain language and readability (W3C COGA)
 
