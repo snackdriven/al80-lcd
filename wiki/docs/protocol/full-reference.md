@@ -77,7 +77,7 @@ These `PK_*` commands have real semantics: they are not neutral page toggles. Se
 | Clear GIF | `0x12` sub 1 → `0x13` sub 2 | — | two announces |
 
 The announce CRC16-MODBUS rule is general. It was verified on 5 different commands (homepage
-`0x0200`, picture `0x03E0`, GIF `0xC341`, time-A `0xC3E1`, time-B `0x0150`).
+`0x0200`, picture `0x03E0`, GIF `0xC341`, time `0xC3E1`, date `0x0150`).
 
 !!! note "Community cross-reference"
     @nvoostrom's VIA definition (`keymap/community/AL80_QMK_V0104-FIX-20250424.json`) shows the

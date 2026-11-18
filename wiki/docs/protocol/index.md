@@ -18,7 +18,7 @@ command set (see [Display commit (PK_*)](display-commit.md)).
 !!! tip "TL;DR"
 
     - Each screen operation is a **three-packet sequence**: `0x40` announce → `0x41` data → `0x42` finish.
-    - The `0xFF60/0x61` interface **accepts only `0x40/0x41/0x42`** and NAKs all other commands. Never probe `0xB1–0xB7` (brick risk).
+    - On the `0xFF60/0x61` interface, the screen commands are `0x40/0x41/0x42`. The vendor commands `0x55` and `0xB0` return a NAK. Never probe `0xB1–0xB7` (brick risk).
     - The device **ACKs each packet**: it echoes the packet with `byte[6] = 0x55`.
 
 !!! note "Two protocols, one interface"
@@ -39,8 +39,9 @@ The command byte (`byte[0]`) values come from the JS bundle of the vendor site:
 | `0xB0` | getFirmwareVersion | returns `0xFF` = NAK on the LCD interface |
 | `0xB1..0xB7` | bootloader / firmware upgrade | DFU flow. **Dangerous: do not use** (see [Safety](../reference/safety.md)) |
 
-**Command-sweep finding (read-only probe):** The `0xFF60` LCD interface accepts only
-`0x40/0x41/0x42`. It NAKs all other commands (`0x55` and `0xB0` both returned `FF 00 00 …`).
+**Command-sweep finding (read-only probe):** On the `0xFF60` LCD interface, the vendor commands `0x55`
+and `0xB0` both returned `FF 00 00 …` (NAK). Only `0x40/0x41/0x42` work for the screen. The VIA
+opcodes `0x01–0x15` also work on this interface (see the note above). The sweep did not test other opcodes.
 The status, version, and config commands are on a different interface (probably `0xFF31`).
 Do **not** probe `0xB1–0xB7`: brick risk.
 

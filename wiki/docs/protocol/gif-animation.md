@@ -90,7 +90,8 @@ them at full speed. The `Ur` send routine of the vendor uses this pacing:
   frame data in 1024-byte banks, with **30 ms after each bank**.
 - **30 ms** after each finish setup.
 
-Still images need no pacing (they are flat, with no banks). Confirmed on the device: with this
+Still images need no per-bank pacing, because they have no banks. They still need the 300 ms / 30 ms
+settles (see [Display commit](display-commit.md)). Confirmed on the device: with this
 pacing, a 3-frame GIF animates on the main page and the clock stays intact. The **GIF inter-frame
 white flash** is a firmware trait of this full panel family. It is not a bug in the upload. See
 [Chunking & pacing](chunking-and-pacing.md).

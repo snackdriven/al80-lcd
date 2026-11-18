@@ -36,7 +36,7 @@ Time announce: `40 00 00 07 F6 02 00 A5 5A 09 00 03 C3 E1`.
 The payload order is **`[year(2-digit), dayOfWeek(1–7), month, dayOfMonth]`** (from the vendor `f`
 handler: `M=[YY, day()||7, month()+1, date()]`). The sample `1a 03 07 01` decodes as year
 `0x1A`=26 (2026), weekday 3, month 7, day 1. This is **2026-07-01**, which agrees with the capture
-time. (An earlier `[DD][MM][YY]` guess was wrong.) Date announce: `A5 5A 10 00 04 …`, subcmd 0x04.
+time. (An earlier `[DD][MM][YY]` guess was wrong.) Date announce: `A5 5A 0A 00 04 01 50` (type `0x0A`, subcmd 0x04, CRC `0x0150`). The handler below writes the type as decimal 10.
 
 ## 📦 Finish packet (0x42)
 
