@@ -1,34 +1,39 @@
 ---
 title: Still images (picture page)
 status: confirmed
+type: reference
 scope: The 96x160 still-image upload format, pixel packing, and the 32-byte tail block
 ---
 
 # Still images (picture page)
 
-A still image is a **flat, unbanked** RGB565 upload to the picture page. To make the module
-actually *display* it, the upload must be paced and committed via `PK_ADD_PIC` — see
-[Display commit (PK_*)](display-commit.md). This page covers the pixel format and byte-map.
+Use this page to look up the still-image format: panel size, upload sequence, block layout and pixel packing.
 
 !!! tip "TL;DR"
 
-    - The panel is **96×160 = 30,720 bytes** RGB565 big-endian, row-major (NOT 112×137).
+    - The panel is **96×160 = 30,720 bytes** RGB565 big-endian, row-major (**not** 112×137).
     - Data = **548 × 56-byte blocks + 1 × 32-byte tail block** at offset `0x77E0`.
-    - The setup packet `A5 5A 0C <len>` **is** `PK_ADD_PIC` (the commit), and display attributes are baked into pixels client-side — there is no brightness/saturation opcode.
+    - The setup packet `A5 5A 0C <len>` **is** `PK_ADD_PIC` (the commit). The client bakes the display attributes into the pixels. There is no brightness/saturation opcode.
+
+A still image is a **flat, unbanked** [RGB565](../reference/glossary.md) upload to the picture page:
+one continuous offset range, with no 1 KB banks. Getting the module to *display* the image is a
+separate step. You have to pace the upload and commit it with `PK_ADD_PIC`. See
+[Display commit (PK_*)](display-commit.md).
 
 ## 📟 Panel geometry — 96×160
 
 The display is **96 wide × 160 tall = 15,360 px = 30,720 bytes** RGB565 big-endian, **row-major**,
-top-left origin.
+with the origin at the top-left.
 
-!!! warning "Correction — it is NOT 112×137"
+!!! warning "Correction — it is not 112×137"
     The old "112×137 / 30,688 bytes / 548 blocks" figure was wrong. The first capture-analysis
-    script filtered out a final **32-byte data block** (`byte[3]=0x20`), dropping the last 16
-    pixels, so every still image built was malformed and never rendered. The firmware length field
-    proves 96×160: the type-`0x0C` setup declares `0x7800 = 30,720 = 96×160`.
+    script removed a final **32-byte data block** (`byte[3]=0x20`). Thus the last 16 pixels were
+    lost, and each still image that was built was malformed and never rendered. The firmware length
+    field proves 96×160: the type-`0x0C` setup declares `0x7800 = 30,720 = 96×160`.
 
-Correct still-image data = **548 × 56-byte blocks + 1 × 32-byte tail block**. The 548 blocks cover
-offsets `0 … 30687`; the tail sits at offset **30,688 (0x77E0)**; total = **30,720 (0x7800)**.
+The correct still-image data is **548 × 56-byte blocks + 1 × 32-byte tail block**. The 548 blocks
+cover offsets `0 … 30687`. The tail is at offset **30,688 (0x77E0)**. The total is
+**30,720 (0x7800)**.
 
 ## 📦 Upload sequence
 
@@ -37,11 +42,11 @@ offsets `0 … 30687`; the tail sits at offset **30,688 (0x77E0)**; total = **30
     data      (0x41):             548 × 56-byte blocks + 1 × 32-byte tail (byte[3]=0x20 at 0x77E0)
     finish    (0x42):             42 00 00 38 7A
 
-!!! info "The setup packet IS the commit command"
-    `A5 5A 0C <len>` is **`PK_ADD_PIC` (0x0C)** = commit-the-scratch-buffer-and-display, not just a
-    length declaration. For it to commit you MUST pace the front of the transfer (~300 ms after the
-    announce, ~30 ms after the setup). And do **not** send a trailing `type 0x0D` — that is
-    `PK_TOGGLE_PIC`, which advances *past* the frame you committed. See
+!!! info "The setup packet is the commit command"
+    `A5 5A 0C <len>` is **`PK_ADD_PIC` (0x0C)** = commit-the-scratch-buffer-and-display. It is not
+    only a length declaration. For the commit to occur, pace the start of the transfer. Wait
+    ~300 ms after the announce. Wait ~30 ms after the setup. **Do not** send a trailing `type 0x0D`.
+    That is `PK_TOGGLE_PIC`, which advances *past* the frame that you committed. See
     [Display commit (PK_*)](display-commit.md).
 
 ## 📦 Data block layout
@@ -50,14 +55,15 @@ offsets `0 … 30687`; the tail sits at offset **30,688 (0x77E0)**; total = **30
 
 | Byte(s) | Field |
 |---|---|
-| `[1,2]` | **little-endian destination byte-offset** into the frame buffer; steps by 56 (0, 56, 112, …) |
+| `[1,2]` | **little-endian destination byte-offset** into the frame buffer; increases by 56 (0, 56, 112, …) |
 | `[3]` | payload length: `0x38` (56) for the 548 blocks; **`0x20` (32) for the final tail** |
 | `[4,5]` | 16-bit LE additive checksum = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF` ([details](checksums.md)) |
 | `[6]` | `0x00` reserved |
-| `[7..62]` | 56 bytes of **RGB565 big-endian** pixels, row-major from top-left |
+| `[7..62]` | 56 bytes of **RGB565 big-endian** pixels, row-major from the top-left |
 
-`0x41` is a **generic block-write**: the LCD is effectively a dumb framebuffer you push arbitrary
-pixels to. A complete frame ends with the 32-byte tail block at `0x77E0` then a `0x42` finish.
+`0x41` is a **generic block-write**, so the LCD works as a plain framebuffer: you can write any
+pixels you like to it. A complete frame ends with the 32-byte tail block at `0x77E0`, then a
+`0x42` finish.
 
 ## 🖼️ Pixel format — RGB565 big-endian
 
@@ -72,13 +78,14 @@ pixels to. A complete frame ends with the 32-byte tail block at `0x77E0` then a 
 | White | `0xFFFF` | `FF FF` |
 | Black | `0x0000` | `00 00` |
 
-The vendor app resamples any uploaded image to native **96×160** before sending (canvas resize
-with `imageSmoothingEnabled=false`). For pixel-perfect graphics, render directly at 96×160.
+The vendor app resamples every uploaded image to the native **96×160** before sending it
+(canvas resize with `imageSmoothingEnabled=false`). For pixel-perfect graphics, render at 96×160
+yourself.
 
 ## 🎨 Display attributes are client-side (no device opcode)
 
-Brightness, Chroma, Saturation, Grayscale, "Fuzzy", Sharpening emit **zero HID traffic**: they
-only update the app's canvas preview and are baked into the pixels on "Save to the device."
-There is no "set brightness/saturation" opcode to reverse; transform your own RGB565 buffer before
-sending. The one save-time exception is frame rate (GIF only). See
-[Render a custom frame](../how-to/render-a-frame.md).
+Brightness, Chroma, Saturation, Grayscale, "Fuzzy" and Sharpening send **zero HID traffic**. They
+only change the app's canvas preview. The app applies them to the pixels when you select **Save to
+the device**. There's no "set brightness/saturation" opcode to reverse-engineer. To get the same
+effect, change your own RGB565 buffer before you send it. The one save-time exception is the frame
+rate (GIF only). See [Render a custom frame](../how-to/render-a-frame.md).

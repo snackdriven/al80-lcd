@@ -3,6 +3,11 @@
 Kept in the private repo on purpose — it names local paths and the deploy flow, so it doesn't
 belong in the public HTML.
 
+## Writing style
+
+See [STYLE.md](STYLE.md): Diataxis page types, plain language (W3C COGA), Microsoft-style
+procedures, and ASD-STE100 for safety-critical text.
+
 ## The setup
 
 - **Source** (Markdown, MkDocs Material): `al80-lcd/wiki/` — private.

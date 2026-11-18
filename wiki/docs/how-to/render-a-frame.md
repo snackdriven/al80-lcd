@@ -1,59 +1,71 @@
 ---
 title: How-to — Render a custom 96×160 frame
 status: confirmed
+type: how-to
 scope: End-to-end recipe to forge a still-image transfer for the LCD info-panel
 ---
 
 # How-to: render a custom 96×160 frame
 
-With both checksums cracked, a full still-image transfer can be forged end-to-end. Any client-side
-look (brightness, grayscale, etc.) must be baked into the pixels first. There is no device
-opcode for it (see [Still images → attributes are client-side](../protocol/still-images.md)).
+Use this page to build your own 96×160 still image and send it to the LCD.
 
-## 🔧 Steps
+Both checksums are now solved, so you can build a full still-image transfer yourself, end to end.
 
-1. **Draw** your content on a **96×160** canvas. Apply brightness/grayscale/etc. here.
+## 📋 Before you start
 
-2. **Convert** each pixel to **RGB565 big-endian**:
+- Put any client-side look (brightness, grayscale, etc.) into the pixels first. There's no device
+  opcode for it (see [Still images → attributes are client-side](../protocol/still-images.md)).
+- Know the terms. A *settle* is a fixed wait that gives the display module time to process the
+  previous packet. *ACK-gated* means you wait for each block's [ACK](../reference/glossary.md)
+  before you send the next block. The packet roles (announce, data, finish) are in the
+  [glossary](../reference/glossary.md).
+
+## 🎨 Stage 1: Build the pixel buffer
+
+1. **Draw** your content on a **96×160** canvas. Apply brightness/grayscale/etc. at this step.
+
+2. **Convert** each pixel to **[RGB565](../reference/glossary.md) big-endian**:
 
         v = ((R>>3)<<11) | ((G>>2)<<5) | (B>>3);   bytes = [v>>8, v & 0xFF]
 
-3. **Concatenate row-major** → a **30,720-byte** buffer (548 × 56-byte blocks + 1 × 32-byte tail).
+3. **Concatenate** the pixels **row-major** into a **30,720-byte** buffer (548 × 56-byte blocks + 1 × 32-byte tail).
 
-4. **Announce (0x40):**
+## 🔧 Stage 2: Send the transfer
+
+1. **Send the announce (0x40):**
 
         40 00 00 08 CF 02 00 A5 5A 10 00 01 C5 B1 01
 
-    type `[9]=0x10` (image); CRC `[12,13]=C5 B1` = CRC16-MODBUS over `[0x10,0x00,0x01]`.
+    The type is `[9]=0x10` (image). The CRC `[12,13]=C5 B1` is CRC16-MODBUS over `[0x10,0x00,0x01]`.
 
-5. **Settle ~300 ms** (the module must process the announce).
+2. **Wait ~300 ms** (settle). The module must process the announce.
 
-6. **Setup / commit (0x41, `PK_ADD_PIC`):**
+3. **Send the setup / commit (0x41, `PK_ADD_PIC`):**
 
         41 00 00 07 21 03 00 A5 5A 0C 78 00 C3 93     ; 0x7800 = 30,720 = 96×160
 
-7. **Settle ~30 ms** (the module must arm the ADD_PIC commit).
+4. **Wait ~30 ms** (settle). The module must arm the ADD_PIC commit.
 
-8. **Data blocks (0x41):** 548 blocks of 56 bytes + 1 final 32-byte tail block, **ACK-gated**:
+5. **Send the data blocks (0x41):** 548 blocks of 56 bytes + 1 final 32-byte tail block, **ACK-gated**. Obey these rules:
     - offset = running byte offset, little-endian in `bytes[1,2]` (0, 56, 112, … 30,688)
     - `byte[3]` = `0x38` (56) for the 548 blocks; **`0x20` (32) for the tail**
     - `byte[6]` = `0x00`, then the payload bytes
-    - checksum (`bytes[4,5]`, 16-bit LE) = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF` —
-      compute **after** laying down the payload
-    - wait for each block's `byte[6]=0x55` ack before sending the next; resend ≤4× if missed
+    - checksum (`bytes[4,5]`, 16-bit LE) = `(0x41 + offLo + offHi + len + Σpayload) & 0xFFFF`.
+      Calculate the checksum **after** you put the payload into the block.
+    - Wait for the `byte[6]=0x55` ack of each block before you send the next block. If an ack is missed, resend the block (≤4×).
 
-9. **Finish (0x42):** `42 00 00 38 7A` (rest zero-padded).
+6. **Send the finish (0x42):** `42 00 00 38 7A` (zero-pad the rest).
 
-10. **Do NOT send a trailing view switch.** `PK_ADD_PIC` already displays the committed frame and it
-    stays; a trailing `0x0D` (`PK_TOGGLE_PIC`) advances past it.
+7. **Do not send a trailing view switch.** `PK_ADD_PIC` already displays the committed frame, and
+    the frame stays. A trailing `0x0D` (`PK_TOGGLE_PIC`) advances past it.
 
 !!! tip "pad()"
-    OS-level HID libs prepend a `0x00` report-ID byte, then zero-fill to 64 data bytes.
+    OS-level HID libs prepend a `0x00` report-ID byte. Then they zero-fill to 64 data bytes.
 
 ## ⚠️ Why the settles and ack-gating matter
 
-Skip the settles and the frame lands in scratch, acks 549/549, and **never displays** (old picture
-stays). Blast the blocks with no flow control and dropped bytes flip pixel alignment → red/blue
-banding. Both are covered on [Display commit (PK_*)](../protocol/display-commit.md) and
-[Chunking & pacing](../protocol/chunking-and-pacing.md). This exact path already renders a live
-Spotify card — see [Now-playing](now-playing.md).
+If you skip the settles, the frame lands in scratch and acks 549/549, but it **never displays**.
+The old picture stays. If you blast the blocks with no flow control, bytes are dropped. The dropped
+bytes flip the pixel alignment, and red/blue banding occurs. [Display commit (PK_*)](../protocol/display-commit.md)
+and [Chunking & pacing](../protocol/chunking-and-pacing.md) cover both problems. This exact path
+already renders a live Spotify card (see [Now-playing](now-playing.md)).

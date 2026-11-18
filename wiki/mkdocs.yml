@@ -99,6 +99,8 @@ markdown_extensions:
 # --- Navigation / information architecture ----------------------------------
 nav:
   - Home: index.md
+  - Tutorial:
+      - Your first custom frame: tutorials/first-custom-frame.md
   - Protocol:
       - protocol/index.md
       - Checksums & CRC: protocol/checksums.md

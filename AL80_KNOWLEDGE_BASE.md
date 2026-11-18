@@ -833,8 +833,9 @@ The device **echoes each packet back** on the input report with **byte[6] set to
 when the LCD showed no visible change (it was on the GIF page, not the clock).
 
 ### Command-sweep finding (read-only probe)
-The 0xFF60 LCD interface **ONLY accepts 0x40 / 0x41 / 0x42** and NAKs everything else
-(0x55 and 0xB0 both returned `FF 00 00 ...`). Status / version / config must live on a
+On the 0xFF60 LCD interface, the vendor commands 0x55 and 0xB0 both returned `FF 00 00 ...` (NAK);
+only **0x40 / 0x41 / 0x42** drive the screen. VIA's 0x01–0x15 also work here (see §2 VIA note), and
+the sweep did not test other opcodes. Status / version / config must live on a
 different interface (likely 0xFF31). **Do NOT probe 0xB1–0xB7** (brick risk).
 
 ---
@@ -1171,7 +1172,7 @@ rev2.1 session (not re-derivable from this repo's captures, which didn't press t
 | Update device time (txn 2) | 10 | 4 | — → data payload `[26,3,7,1]` (packed date/time) |
 
 The announce CRC16-MODBUS (§5e) was generalized and **verified on 5 distinct commands**
-(homepage 0x0200, picture 0x03E0, GIF 0xC341, time-A 0xC3E1, time-B 0x0150).
+(homepage 0x0200, picture 0x03E0, GIF 0xC341, time 0xC3E1, date 0x0150).
 
 **Clear commands — DECODED from source (§5f), never need capturing:**
 - **Clear picture** = announce **type 14** + finish, sent **16 times** (once per image slot).
