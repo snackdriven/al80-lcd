@@ -6,7 +6,7 @@ scope: All key constants in one table
 
 # Quick reference
 
-All key constants in one place. Deep detail lives in the [Protocol](../protocol/index.md) section.
+This page gives all key constants in one table. The [Protocol](../protocol/index.md) section gives the full details.
 
 | Thing | Value |
 |---|---|
@@ -26,6 +26,6 @@ All key constants in one place. Deep detail lives in the [Protocol](../protocol/
 | Data-packet checksum bytes[4,5] | 16-bit LE = `(0x41+offLo+offHi+len+Σpayload) & 0xFFFF` |
 | Time data checksum | `CKSUM = (0x41 + 0x03 + HH + MM + SS) & 0xFF` |
 | 12-hour hour value | `HH = (hour24 % 12) || 12` |
-| Re-sync interval | ~60 s (keyboard free-runs its own clock and drifts) |
+| Re-sync interval | ~60 s (the keyboard runs its own clock, and that clock drifts) |
 | Custom-QMK LCD enable | **C9 driven HIGH** (`common.h:83 LCD_SWITCH C9`). **B7 = aw20216s LED-driver EN only**. Forward raw-HID → USART3 (PC10/PC11) @ **460800 8N1** (921600 = b75Pro fallback) |
-| DO NOT TOUCH | commands `0xB0–0xB7` (bootloader / DFU — brick risk) |
+| DO NOT TOUCH | Do not send commands `0xB0–0xB7` (bootloader / DFU). They can brick the keyboard. |

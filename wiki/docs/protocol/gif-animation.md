@@ -6,14 +6,20 @@ scope: The banked GIF wire format, the MODE byte, per-frame headers, banking, FP
 
 # GIF / animation
 
-One wire format with a **MODE byte** threaded through every packet, three modes, banked 1 KB pixel
-windows, and mandatory send pacing. Frames are sent sequentially.
+The GIF upload uses one wire format. This format has:
+
+- A **MODE byte** in each packet.
+- Three modes.
+- Banked 1 KB pixel windows.
+- Mandatory send pacing.
+
+The frames are sent in sequence.
 
 !!! tip "TL;DR"
 
-    - Three modes (startup / GIF page / main page) selected by the **MODE byte** threaded through every packet.
-    - Pixel data streams in **1024-byte banks** (18×56 + 1×16 blocks); the offset **resets per bank** and the device advances banks implicitly.
-    - **Send pacing is MANDATORY** — drop the pacing or the per-frame index and the GIF renders white/garbage.
+    - There are three modes (startup / GIF page / main page). The **MODE byte** in each packet selects the mode.
+    - The pixel data goes in **1024-byte banks** (18×56 + 1×16 blocks). The offset **resets for each bank**, and the device advances banks implicitly.
+    - **Send pacing is MANDATORY.** If you remove the pacing or the per-frame index, the GIF renders white/garbage.
 
 ## 🎞️ Modes
 
@@ -37,28 +43,30 @@ windows, and mandatory send pacing. Frames are sent sequentially.
 
 ## 📦 Per-frame header = `[0x02, mode, FRAME_INDEX]`
 
-The **frame index is the 10th payload byte** (header length byte = `0x0A` = 10) and increments
+The **frame index is the 10th payload byte** (header length byte = `0x0A` = 10). It increments
 0, 1, 2, …
 
-!!! warning "Drop the frame index and the GIF renders WHITE"
-    Sending only `[0x02, mode]` makes every frame index 0, so frames overwrite each other. This was
-    a real bug. Byte-verified via the checksum: mode-2 frame 0 header `… 04 30 02 02 00` → cksum
-    `0x95`; frame 1 `… 04 30 02 02 01` → cksum `0x96` (base + N).
+!!! warning "If you remove the frame index, the GIF renders WHITE"
+    If you send only `[0x02, mode]`, each frame index is 0, and the frames overwrite each other.
+    This was a real bug. The checksum gives byte verification: mode-2 frame 0 header
+    `… 04 30 02 02 00` → cksum `0x95`; frame 1 `… 04 30 02 02 01` → cksum `0x96` (base + N).
 
 ## 📦 Banking — 1024-byte banks, offset resets per bank
 
-Each frame's pixel data streams in **1024-byte banks**. Each bank = **18 × 56-byte blocks + 1 ×
+The pixel data of each frame goes in **1024-byte banks**. Each bank = **18 × 56-byte blocks + 1 ×
 16-byte block** (18×56 + 16 = 1024).
 
-The packet offset (`bytes[1,2]`, little-endian) **resets per bank**: 0, `0x38`, `0x70`, … `0x3B8`,
-then the 16-byte block at **`0x3F0`**. The device advances banks implicitly: it keeps its own
-destination pointer and bumps it 1024 bytes each completed bank. There is no per-bank address
-field (proven: consecutive banks of a solid-color frame are byte-for-byte identical).
+The packet offset (`bytes[1,2]`, little-endian) **resets for each bank**: 0, `0x38`, `0x70`, …
+`0x3B8`, then the 16-byte block at **`0x3F0`**. The device advances banks implicitly. It keeps its
+own destination pointer and increases it by 1024 bytes after each completed bank. There is no
+per-bank address field. (Proof: consecutive banks of a solid-color frame are byte-for-byte
+identical.)
 
 - mode 2 (12,288 B) = **12 banks/frame**
 - modes 0/1 (30,720 B) = **30 banks/frame**
 
-Frame boundaries carry the setup packets; banks between them do not:
+The setup packets are at the frame boundaries. The banks between the boundaries have no setup
+packets:
 
     per frame:  ANNOUNCE(0x12) → SETUP 0x13 → header(0x10) → length(0x11) → [bank]×N
     per bank:   19 blocks (18×56 + 1×16), offset 0x0000 … 0x03F0, then straight into next bank's 0x0000
@@ -68,27 +76,27 @@ Frame boundaries carry the setup packets; banks between them do not:
 - **FPS** = the trailing byte of the type-`0x13` finish packet (UI slider **1–60**, default **30**).
 - **FRAME COUNT** = the trailing byte of the type-`0x12` finish packet (capped 64/160/42 by mode).
 
-Both are single bytes sent at the end of the transfer.
+Both values are single bytes. They are sent at the end of the transfer.
 
 ## ⚠️ Send pacing is MANDATORY (this was the killer bug)
 
-The device needs time to commit each bank. Sent back-to-back, banks overwrite each other and the
-GIF renders as garbage bars. Even the vendor's own captured bytes fail if blasted at full
-speed. The vendor's `Ur` send routine paces like this:
+The device needs time to commit each bank. If you send the banks back-to-back, they overwrite each
+other and the GIF renders as garbage bars. The captured bytes of the vendor also fail if you send
+them at full speed. The `Ur` send routine of the vendor uses this pacing:
 
 - **30 ms** after the initial setup.
 - **Per frame:** send the header, then `sleep(frameIndex % 16 === 0 ? 3000 : 30)` (a **3-second
-  pause** after frame 0 and every 16th frame, else 30 ms); then the length; then the frame data in
-  1024-byte banks with **30 ms after each bank**.
+  pause** after frame 0 and every 16th frame, else 30 ms). Then send the length. Then send the
+  frame data in 1024-byte banks, with **30 ms after each bank**.
 - **30 ms** after each finish setup.
 
-Still images need no pacing (they are flat, no banks). Confirmed on-device: with this pacing a
-3-frame GIF animates on the main page with the clock intact. **GIF inter-frame white flash** is a
-firmware trait of this whole panel family — not a bug in the upload. See
+Still images need no pacing (they are flat, with no banks). Confirmed on the device: with this
+pacing, a 3-frame GIF animates on the main page and the clock stays intact. The **GIF inter-frame
+white flash** is a firmware trait of this full panel family. It is not a bug in the upload. See
 [Chunking & pacing](chunking-and-pacing.md).
 
 !!! note "Capture vs source variant"
-    The vendor web component emits GIF control subcmds `0x02/0x03`; this repo's own GIF *capture*
+    The vendor web component sends GIF control subcmds `0x02/0x03`. The GIF *capture* of this repo
     showed setup subcmds `0x09/0x0A/0x07` with the banked 1 KB windows. The bundle has several
-    product code paths; the captured device is ground truth for *this* keyboard. Reconcile with a
-    fresh capture before forging GIFs.
+    product code paths. The captured device is ground truth for *this* keyboard. Before you forge
+    GIFs, compare the two variants with a fresh capture.

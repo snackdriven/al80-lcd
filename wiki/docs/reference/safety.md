@@ -6,23 +6,25 @@ scope: Brick risks, the DFU sequence to avoid, and the single-opener rule
 
 # Safety / do-not-touch
 
-Brick risks, the DFU sequence to avoid, and the single-opener rule.
+This page gives the brick risks, the DFU sequence to avoid, and the single-opener rule.
 
 !!! danger "Never send 0xB0–0xB7"
-    `0xB0–0xB7` are bootloader / firmware-upgrade (DFU) commands. Do **not** experiment with them —
-    risk of bricking or wiping firmware. Stick to `0x40/0x41/0x42`.
+    Do **not** send or experiment with commands `0xB0–0xB7`. These are bootloader /
+    firmware-upgrade (DFU) commands. They can brick the keyboard or erase the firmware. Send only
+    `0x40/0x41/0x42`.
 
 ## ⚠️ Rules
 
-- **Never reflash carelessly.** The ripple lighting firmware is the whole reason for the VIA-only
-  and HID-script approach. Custom-QMK bins in `firmware/` replace it, so treat every flash as
-  deliberate (see [Custom QMK](../firmware/custom-qmk.md)).
-- **Only one opener** of the `0xFF60` interface at a time: close the browser tab (and VIA) before
-  running scripts.
+- **Never reflash carelessly.** The ripple lighting firmware is the full reason for the VIA-only
+  and HID-script approach. Custom-QMK bins in `firmware/` replace it. Thus, flash only on purpose
+  and with care (see [Custom QMK](../firmware/custom-qmk.md)).
+- **Only one opener** of the `0xFF60` interface at a time. Close the browser tab (and VIA) before
+  you run scripts.
 
 ## ❌ The exact DFU sequence to avoid
 
-Decoded from source. This is what a firmware update does, so never send it manually:
+This sequence was decoded from source. A firmware update sends this sequence. Never send it
+manually:
 
     0xB1 toBootLoader
       → poll 0xB2 getBootLoaderStatus   (every 200 ms, ≤20 tries)
@@ -32,5 +34,6 @@ Decoded from source. This is what a firmware update does, so never send it manua
       → 0xB6 upgradeComplete
       → 0xB7 endUpgrade
 
-A second, colliding `mechanicalKeyboard*` DFU set (opcodes `0x00–0x04`/`0x10`/`0x20`/`0x55`) exists
-for a different device family, irrelevant to the AL80, just don't confuse the two.
+A second, colliding `mechanicalKeyboard*` DFU set (opcodes `0x00–0x04`/`0x10`/`0x20`/`0x55`)
+also exists. It is for a different device family and does not apply to the AL80. Do not confuse
+the two sets.
